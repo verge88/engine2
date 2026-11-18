@@ -1,4 +1,5 @@
 #include "engine2/Camera.hpp"
+#include "engine2/GltfLoader.hpp"
 #include "engine2/Mesh.hpp"
 #include "engine2/Renderer.hpp"
 
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -33,7 +35,7 @@ public:
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
         glfwWindowHint(GLFW_SAMPLES, 4);
-        window_ = glfwCreateWindow(1280, 720, "engine2 | PBR renderer", nullptr, nullptr);
+        window_ = glfwCreateWindow(1280, 720, "engine2 | glTF PBR renderer", nullptr, nullptr);
         if (!window_) {
             glfwTerminate();
             throw std::runtime_error("Failed to create an OpenGL 3.3 window");
@@ -54,29 +56,32 @@ private:
     GLFWwindow* window_ = nullptr;
 };
 
-std::optional<std::uint64_t> parseArgs(int argc, char** argv) {
-    std::optional<std::uint64_t> frameLimit;
+struct Arguments {
+    std::optional<std::uint64_t> frames;
+    std::optional<std::filesystem::path> model;
+    bool help = false;
+};
+
+Arguments parseArgs(int argc, char** argv) {
+    Arguments args;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: engine2 [--frames N]\n";
-            std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
-                         "Shift sprint, wheel FOV, Tab cursor, Esc exit.\n";
-            return std::uint64_t{0};
-        }
-        if (arg == "--frames" && i + 1 < argc) {
+            args.help = true;
+        } else if (arg == "--frames" && i + 1 < argc) {
             const std::string count(argv[++i]);
             std::size_t parsed = 0;
             const std::uint64_t value = std::stoull(count, &parsed);
-            if (parsed != count.size() || value == 0) {
+            if (parsed != count.size() || value == 0)
                 throw std::invalid_argument("--frames expects a positive integer");
-            }
-            frameLimit = value;
+            args.frames = value;
+        } else if (arg == "--model" && i + 1 < argc) {
+            args.model = std::filesystem::path(argv[++i]);
         } else {
             throw std::invalid_argument("Unknown or incomplete argument: " + arg);
         }
     }
-    return frameLimit;
+    return args;
 }
 
 std::filesystem::path shaderDirectory(const char* executable) {
@@ -92,9 +97,9 @@ std::vector<engine2::RenderItem> createScene(const engine2::Mesh& sphere,
     ground.mesh = &floor;
     ground.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
     ground.model = glm::scale(ground.model, glm::vec3(32.0f, 1.0f, 32.0f));
-    ground.albedo = glm::vec3(0.3f);
-    ground.roughness = 0.88f;
-    ground.checker = true;
+    ground.material.albedo = glm::vec3(0.3f);
+    ground.material.roughness = 0.88f;
+    ground.material.checker = true;
     items.push_back(ground);
 
     for (int row = 0; row < 5; ++row) {
@@ -104,9 +109,9 @@ std::vector<engine2::RenderItem> createScene(const engine2::Mesh& sphere,
             item.model = glm::translate(glm::mat4(1.0f),
                 glm::vec3((column - 2) * 2.1f, -0.52f, (row - 2) * 2.1f));
             item.model = glm::scale(item.model, glm::vec3(0.48f));
-            item.albedo = glm::vec3(0.9f, 0.52f, 0.26f);
-            item.metallic = static_cast<float>(row) / 4.0f;
-            item.roughness = 0.08f + static_cast<float>(column) * 0.21f;
+            item.material.albedo = glm::vec3(0.9f, 0.52f, 0.26f);
+            item.material.metallic = static_cast<float>(row) / 4.0f;
+            item.material.roughness = 0.08f + static_cast<float>(column) * 0.21f;
             items.push_back(item);
         }
     }
@@ -114,8 +119,13 @@ std::vector<engine2::RenderItem> createScene(const engine2::Mesh& sphere,
 }
 
 int run(int argc, char** argv) {
-    const auto frames = parseArgs(argc, argv);
-    if (frames && *frames == 0) return 0;
+    const Arguments args = parseArgs(argc, argv);
+    if (args.help) {
+        std::cout << "Usage: engine2 [--model path/to/scene.gltf|.glb] [--frames N]\n";
+        std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
+                     "Shift sprint, wheel FOV, Tab cursor, Esc exit.\n";
+        return 0;
+    }
 
     GlfwSession session;
     GLFWwindow* window = session.window();
@@ -141,16 +151,26 @@ int run(int argc, char** argv) {
         static_cast<engine2::Camera*>(glfwGetWindowUserPointer(w))->onScroll(y);
     });
 
-    // The GPU resources must be destroyed before GlfwSession destroys the context.
+    // All GL resources must be destroyed before GlfwSession destroys the context.
     engine2::Renderer renderer(shaderDirectory(argv[0]));
-    engine2::Mesh sphere = engine2::Mesh::sphere();
-    engine2::Mesh floor = engine2::Mesh::plane();
-    const auto scene = createScene(sphere, floor);
+    std::optional<engine2::LoadedScene> imported;
+    std::unique_ptr<engine2::Mesh> sphere;
+    std::unique_ptr<engine2::Mesh> floor;
+    std::vector<engine2::RenderItem> scene;
+    if (args.model) {
+        imported.emplace(engine2::loadGltf(*args.model));
+        scene = imported->items;
+        if (scene.empty()) throw std::runtime_error("glTF scene has no renderable primitives");
+    } else {
+        sphere = std::make_unique<engine2::Mesh>(engine2::Mesh::sphere());
+        floor = std::make_unique<engine2::Mesh>(engine2::Mesh::plane());
+        scene = createScene(*sphere, *floor);
+    }
 
     double lastTime = glfwGetTime();
     bool previousTab = false;
     std::uint64_t rendered = 0;
-    while (!glfwWindowShouldClose(window) && (!frames || rendered < *frames)) {
+    while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
         glfwPollEvents();
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);

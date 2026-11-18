@@ -1,22 +1,23 @@
 # engine2
 
-**engine2** — учебно-практическое ядро собственного 3D-движка на **C++20** с OpenGL 3.3 Core. Это рабочий старт для фотореалистичного рендеринга, **не готовый аналог Unreal Engine**.
+**engine2 v0.2** — собственное ядро 3D-движка на **C++20** с OpenGL 3.3 Core. Это расширяемая база для фотореалистичного рендеринга, **пока не готовый игровой движок уровня Unreal Engine**.
 
-## Что уже реализовано
+## Возможности
 
-- Собственный цикл приложения, управление камерой от первого лица и обработка ввода.
-- Генерация 3D-сетки сферы и плоскости, VAO/VBO/EBO, трансформации объектов.
-- Прямое освещение по **Cook–Torrance / GGX PBR** (metallic–roughness).
-- **Directional shadow map** 2048×2048 с 3×3 PCF-фильтрацией.
-- Hemisphere ambient fill, аппроксимация **ACES filmic tone mapping** и вывод в sRGB.
-- Демо: 25 сфер с разной металличностью/шероховатостью и пол с процедурной текстурой.
-- CMake, автоматическая подгрузка зависимостей и Linux CI со smoke test.
+- Собственный цикл приложения, камера от первого лица, обработка ввода.
+- Процедурные сферы и плоскость, VAO/VBO/EBO, матрицы трансформаций.
+- **glTF 2.0 (.gltf и .glb)**: треугольные меши, индексы, UV0, нормали, тангенты и их генерация, иерархия узлов, несколько экземпляров меша.
+- **Текстурные PBR-материалы** glTF: base color (sRGB), metallic/roughness (каналы B/G), normal map, occlusion, emissive. Поддерживаются фильтры и wrap-режимы sampler; mipmaps.
+- Cook–Torrance **GGX PBR**, directional shadow map 2048×2048 с 3×3 PCF, double-sided surfaces.
+- Приближённое ambient-освещение, ACES filmic tonemapping и гамма-коррекция.
+- Сцена с 25 PBR-сферами по умолчанию, загрузка внешней модели через CLI.
+- CMake, GLFW, GLM, glad, tinygltf и автоматические CTest-smoke tests в Linux CI.
 
-Используются только базовые библиотеки: **GLFW** (окно и ввод), **glad** (загрузка OpenGL) и **GLM** (линейная алгебра). Система материалов, проход теней, шейдеры, геометрия и рендерер написаны в проекте.
+Сторонние библиотеки используются для окна, математики, OpenGL-загрузчика и **парсинга файла glTF**. GPU-ресурсы, геометрическая подготовка, материалы, шейдеры и рендерер реализованы в самом engine2.
 
 ## Сборка
 
-Требования: CMake 3.24+, C++20 compiler, Python 3 (для glad), Git, драйвер с **OpenGL 3.3 Core** и интернет при первой конфигурации CMake. На Linux нужны заголовки X11 и OpenGL (например, `libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev` в Ubuntu).
+Требования: CMake 3.24+, компилятор C++20, Python 3, Git, драйвер **OpenGL 3.3 Core**, интернет при первой конфигурации CMake. На Ubuntu установите `libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -24,13 +25,19 @@ cmake --build build --parallel
 ./build/engine2
 ```
 
-Windows (Visual Studio): `cmake -S . -B build`, затем `cmake --build build --config Release`; приложение будет в `build/Release/engine2.exe`. macOS: требуется поддержка OpenGL 3.3 Core; в GLFW включён forward-compatible контекст.
+Для Windows с Visual Studio: `cmake -S . -B build`, затем `cmake --build build --config Release`. На macOS нужен forward-compatible контекст OpenGL 3.3 Core.
+
+## Загрузка glTF/GLB
 
 ```bash
-./build/engine2 --frames 3   # запустить 3 кадра и завершиться (для CI)
+./build/engine2 --model /absolute/path/to/model.glb
+./build/engine2 --model tests/data/textured-triangle.gltf --frames 3
+ctest --test-dir build --output-on-failure
 ```
 
-После сборки шейдеры копируются рядом с исполняемым файлом в каталог `shaders`; при перемещении бинарника копируйте также каталог шейдеров.
+Аргумент `--model` заменяет демонстрационную сцену импортированной. Модель должна содержать хотя бы один непрозрачный треугольный примитив. Переместите камеру к объекту при необходимости; автоматическое кадрирование ещё не реализовано.
+
+Шейдеры копируются в `shaders` рядом с исполняемым файлом. При перемещении программы перенесите также каталог шейдеров.
 
 ## Управление
 
@@ -44,16 +51,15 @@ Windows (Visual Studio): `cmake -S . -B build`, затем `cmake --build build 
 | Колесо мыши | Угол обзора |
 | Esc | Выход |
 
-## Ограничения версии 0.1
+## Ограничения
 
-PBR-освещение — **лишь часть фотореализма**. В этой версии нет glTF/asset pipeline, PBR-текстур, image-based lighting, SSAO/SSR, TAA, глобального освещения, трассировки лучей, системы сцены/ECS, физики и редактора. Свет окружения пока приближённый, тени — от одного направленного источника. См. [план развития](docs/ROADMAP.md).
-
-### Структура
+Пока поддерживаются **непрозрачные glTF 2.0 TRIANGLES** с UV0 и обычными accessor-данными. Скининг, морфинг, анимации, разреженные accessors, UV1, alpha mask/blend, KHR-расширения и компрессия мешей не реализованы. Модели с прозрачными материалами пропускаются. В сцене пока один направленный источник света и приближённый заполняющий свет без HDR/IBL. Для реального фотореализма нужны HDR-окружения, GI, физически корректная экспозиция, продвинутая постобработка и оптимизация. См. [план развития](docs/ROADMAP.md).
 
 ```text
-include/engine2/   Публичные C++ интерфейсы
+include/engine2/   C++ API: Camera, Mesh, Material, Texture, GltfLoader, Renderer
 src/               Реализация и демо-приложение
-shaders/           GLSL 330: PBR + shadow pass
-docs/ROADMAP.md    Технические этапы развития
-.github/workflows/ Сборка и smoke test
+shaders/           GLSL 330: GGX PBR + shadow pass
+tests/data/        Малый glTF 2.0 asset со встроенными текстурами
+docs/ROADMAP.md    Этапы дальнейшей разработки
+.github/workflows/ Сборка и CTest в CI
 ```

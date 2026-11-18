@@ -20,7 +20,5 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 2
-      - name: Smoke test (software OpenGL)
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
-        run: xvfb-run -a ./build/engine2 --frames 3
+      - name: CTest (software OpenGL + embedded glTF textures)
+        run: ctest --test-dir build --output-on-failure

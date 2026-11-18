@@ -38,10 +38,15 @@ Mesh::Mesh(std::vector<Vertex> vertices, std::vector<std::uint32_t> indices) {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           reinterpret_cast<void*>(offsetof(Vertex, position)));
-
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           reinterpret_cast<void*>(offsetof(Vertex, normal)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          reinterpret_cast<void*>(offsetof(Vertex, uv)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          reinterpret_cast<void*>(offsetof(Vertex, tangent)));
     glBindVertexArray(0);
 }
 
@@ -100,7 +105,12 @@ Mesh Mesh::sphere(unsigned int sectors, unsigned int stacks) {
                 std::cos(theta),
                 std::sin(theta) * std::sin(phi)
             );
-            vertices.push_back(Vertex{normal, normal});
+            vertices.push_back(Vertex{
+                normal, normal,
+                glm::vec2(static_cast<float>(x) / static_cast<float>(sectors),
+                          static_cast<float>(y) / static_cast<float>(stacks)),
+                glm::vec4(-std::sin(phi), 0.0f, std::cos(phi), -1.0f)
+            });
         }
     }
 
@@ -111,18 +121,18 @@ Mesh Mesh::sphere(unsigned int sectors, unsigned int stacks) {
             indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
         }
     }
-
     return Mesh(std::move(vertices), std::move(indices));
 }
 
 Mesh Mesh::plane() {
     const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    const glm::vec4 tangent(1.0f, 0.0f, 0.0f, -1.0f);
     return Mesh(
         {
-            {{-0.5f, 0.0f, -0.5f}, up},
-            {{ 0.5f, 0.0f, -0.5f}, up},
-            {{ 0.5f, 0.0f,  0.5f}, up},
-            {{-0.5f, 0.0f,  0.5f}, up}
+            {{-0.5f, 0.0f, -0.5f}, up, {0.0f, 0.0f}, tangent},
+            {{ 0.5f, 0.0f, -0.5f}, up, {1.0f, 0.0f}, tangent},
+            {{ 0.5f, 0.0f,  0.5f}, up, {1.0f, 1.0f}, tangent},
+            {{-0.5f, 0.0f,  0.5f}, up, {0.0f, 1.0f}, tangent}
         },
         {0, 2, 1, 0, 3, 2}
     );
