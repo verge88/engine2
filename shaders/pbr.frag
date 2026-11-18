@@ -51,6 +51,9 @@ struct PointLight {
 };
 uniform PointLight uPointLights[MAX_POINT_LIGHTS];
 uniform int uPointLightCount;
+uniform samplerCube uPointShadow0;
+uniform samplerCube uPointShadow1;
+uniform int uPointShadowCount;
 
 const float PI = 3.14159265359;
 
@@ -114,6 +117,39 @@ vec3 evaluateLight(vec3 N, vec3 V, vec3 L, vec3 radiance,
     return (kd * albedo / PI + specular) * radiance * ndotl;
 }
 
+
+// World-space radial shadow test for OpenGL 3.3 cube samplers.
+// Samplers are named explicitly: GLSL 3.30 forbids dynamically indexing
+// sampler arrays with a non-constant index.
+float pointShadowFactor(int lightIndex, vec3 N, vec3 L, float farPlane) {
+    if (lightIndex >= uPointShadowCount) return 0.0;
+    vec3 sampleDirection = vWorldPosition - uPointLights[lightIndex].position;
+    float currentDistance = length(sampleDirection);
+    if (currentDistance <= 0.1 || currentDistance >= farPlane) return 0.0;
+
+    const vec3 offsets[12] = vec3[12](
+        vec3( 1.0,  1.0,  1.0), vec3( 1.0, -1.0,  1.0),
+        vec3(-1.0,  1.0,  1.0), vec3(-1.0, -1.0,  1.0),
+        vec3( 1.0,  1.0, -1.0), vec3( 1.0, -1.0, -1.0),
+        vec3(-1.0,  1.0, -1.0), vec3(-1.0, -1.0, -1.0),
+        vec3( 1.0,  0.0,  0.0), vec3(-1.0,  0.0,  0.0),
+        vec3( 0.0,  1.0,  0.0), vec3( 0.0, -1.0,  0.0)
+    );
+    const int tapCount = 12;
+    float bias = max(0.012, 0.045 * (1.0 - max(dot(N, L), 0.0)));
+    float diskRadius = 0.04 + 0.008 * currentDistance;
+    float blocked = 0.0;
+    for (int tap = 0; tap < tapCount; ++tap) {
+        vec3 direction = sampleDirection + offsets[tap] * diskRadius;
+        float normalizedDepth = lightIndex == 0
+            ? texture(uPointShadow0, direction).r
+            : texture(uPointShadow1, direction).r;
+        blocked += (currentDistance - bias > normalizedDepth * farPlane)
+            ? 1.0 : 0.0;
+    }
+    return blocked / float(tapCount);
+}
+
 void main() {
     // glTF baseColor RGB is sRGB-decoded by GL_SRGB8_ALPHA8; the texture
     // alpha channel remains linear. OPAQUE ignores alpha by specification.
@@ -166,7 +202,9 @@ void main() {
         float attenuation = fade / max(distanceToLight * distanceToLight, 0.25);
         vec3 radiance = uPointLights[i].color *
                          (uPointLights[i].intensity * attenuation);
-        direct += evaluateLight(N, V, normalize(toLight), radiance,
+        vec3 pointL = normalize(toLight);
+        float visibility = 1.0 - pointShadowFactor(i, N, pointL, range);
+        direct += evaluateLight(N, V, pointL, radiance * visibility,
                                 baseColor, f0, metallic, roughness);
     }
 

@@ -36,9 +36,11 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
       environment_(shaderDir, options.hdrEnvironment),
       postProcess_(shaderDir),
       ambientOcclusion_(shaderDir),
+      pointShadowMaps_(shaderDir),
       options_(std::move(options)) {
     setExposure(options_.exposure);
     setBloomStrength(options_.bloomStrength);
+    setPointShadowCount(options_.pointShadowCount);
     lightDirection_ = glm::normalize(lightDirection_);
 
     glEnable(GL_DEPTH_TEST);
@@ -91,6 +93,10 @@ void Renderer::setPointLights(const std::vector<PointLight>& lights) {
     pointLights_.assign(lights.begin(),
                          lights.begin() + static_cast<std::ptrdiff_t>(
                              std::min(lights.size(), maxPointLights)));
+}
+
+void Renderer::setPointShadowCount(std::size_t count) {
+    options_.pointShadowCount = std::min(count, PointShadowMaps::maxShadowLights);
 }
 
 void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items,
@@ -154,6 +160,13 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
+    // Pass 1b: six radial depth faces per shadow-enabled point light.
+    // Off-camera casters remain: they can cast shadows into the visible frame.
+    const std::size_t activePointShadows =
+        std::min(options_.pointShadowCount, pointLights_.size());
+    stats_.pointShadowDrawCalls = pointShadowMaps_.render(
+        items, pointLights_, activePointShadows);
+
     // Pass 2: linear HDR color, cubemap sky, textured GGX + diffuse/specular IBL.
     if (options_.ssao) {
         ambientOcclusion_.render(view, projection, visible,
@@ -182,6 +195,9 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     pbrShader_.setInt("uUseSSAO", options_.ssao ? 1 : 0);
     pbrShader_.setVec2("uViewport", glm::vec2(
         static_cast<float>(framebufferWidth), static_cast<float>(framebufferHeight)));
+    pbrShader_.setInt("uPointShadow0", 10);
+    pbrShader_.setInt("uPointShadow1", 11);
+    pbrShader_.setInt("uPointShadowCount", static_cast<int>(activePointShadows));
     pbrShader_.setInt("uPointLightCount", static_cast<int>(pointLights_.size()));
     for (std::size_t i = 0; i < pointLights_.size(); ++i) {
         const std::string name = "uPointLights[" + std::to_string(i) + "].";
@@ -201,6 +217,12 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glBindTexture(GL_TEXTURE_2D, environment_.brdfLut());
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, options_.ssao ? ambientOcclusion_.texture() : 0);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_CUBE_MAP,
+                  activePointShadows >= 1 ? pointShadowMaps_.texture(0) : 0);
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_CUBE_MAP,
+                  activePointShadows >= 2 ? pointShadowMaps_.texture(1) : 0);
 
     auto drawPbrItem = [&](const RenderItem& item) {
         const Material& material = item.material;
@@ -271,7 +293,7 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         glDisable(GL_BLEND);
     }
     glEnable(GL_CULL_FACE);
-    for (int unit = 9; unit >= 0; --unit) {
+    for (int unit = 11; unit >= 0; --unit) {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, 0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);

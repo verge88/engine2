@@ -25,14 +25,29 @@
 - [x] Статистика отправленных, видимых и отброшенных примитивов
 - [x] Frustum unit tests + pixel comparisons on/off lighting
 
-## v0.5 — прозрачные материалы и тесты (в работе)
-- [ ] Point shadow cubemaps, cascaded directional shadows
+## v0.5 — прозрачные материалы и тесты (готово)
 - [x] Alpha MASK/BLEND glTF: cutout-тени и SSAO, сортировка blended мешей, тесты кадров
 - [ ] UV1, KHR glTF extensions
 - [ ] Temporal anti-aliasing и motion vectors
 - [ ] Auto exposure, более качественный multi-scale bloom
 - [ ] GPU profiling, asset caching, instanced rendering, culling hierarchy
 - [ ] Scene/ECS и игровой цикл с физическими объектами
+
+## v0.6 — тени точечных источников (готово)
+- [x] Shadow cubemaps 256² × 6 для первых двух точечных источников
+- [x] Радиальная линейная depth-запись + 12-tap PCF сравнение в GLSL 330
+- [x] Консервативное light-radius culling теневых примитивов
+- [x] Alpha MASK вырезы в кубических тенях; BLEND исключены
+- [x] CLI `--point-shadows 0..2`, `--light-time`, draw-call diagnostics
+- [x] Интеграционные screenshots on/off + pixel difference в CTest
+
+## v0.7 — изображения и сцена (план)
+- [ ] Cascaded shadow maps для направленного света
+- [ ] Temporal AA и motion vectors
+- [ ] Автоматическая HDR-экспозиция, более качественный bloom
+- [ ] GPU profiling, cached shadow maps, instanced rendering
+- [ ] UV1 и KHR glTF extensions
+- [ ] Scene/ECS, редактор сцен и физические объекты
 
 ## v0.6+ — более крупные системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
