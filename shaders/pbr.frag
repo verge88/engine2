@@ -32,6 +32,10 @@ uniform int uHasNormalTexture;
 uniform int uHasOcclusionTexture;
 uniform int uHasEmissiveTexture;
 
+uniform samplerCube uIrradianceMap;
+uniform samplerCube uPrefilterMap;
+uniform sampler2D uBrdfLut;
+
 const float PI = 3.14159265359;
 
 float distributionGGX(vec3 normal, vec3 halfway, float roughness) {
@@ -76,11 +80,6 @@ float shadowFactor(vec3 normal) {
         }
     }
     return shadow / 9.0;
-}
-
-vec3 acesApprox(vec3 color) {
-    return clamp((color * (2.51 * color + 0.03)) /
-                 (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
 }
 
 void main() {
@@ -129,11 +128,20 @@ void main() {
     vec3 direct = (kd * baseColor / PI + specular) *
                   uLightColor * ndotl * (1.0 - shadowFactor(N));
 
-    // Approximate sky fill; prefiltered environment maps will replace it.
-    float skyFacing = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 sky = mix(vec3(0.06, 0.053, 0.05), vec3(0.16, 0.20, 0.28), skyFacing);
-    vec3 ambient = sky * baseColor * (1.0 - metallic) +
-                   f0 * vec3(0.10, 0.11, 0.13) * (1.0 - roughness * 0.65);
+    // Physically based split-sum IBL: diffuse irradiance / PI plus GGX
+    // prefiltered specular radiance integrated with the BRDF lookup table.
+    float ndotv = max(dot(N, V), 0.0);
+    vec3 fresnelIBL = f0 + (max(vec3(1.0 - roughness), f0) - f0) *
+                         pow(1.0 - ndotv, 5.0);
+    vec3 kdIBL = (vec3(1.0) - fresnelIBL) * (1.0 - metallic);
+    vec3 irradiance = texture(uIrradianceMap, N).rgb;
+    vec3 diffuseIBL = irradiance * baseColor / PI;
+
+    vec3 reflection = reflect(-V, N);
+    vec3 prefiltered = textureLod(uPrefilterMap, reflection, roughness * 4.0).rgb;
+    vec2 brdf = texture(uBrdfLut, vec2(ndotv, roughness)).rg;
+    vec3 specularIBL = prefiltered * (fresnelIBL * brdf.x + brdf.y);
+    vec3 ambient = kdIBL * diffuseIBL + specularIBL;
     if (uHasOcclusionTexture != 0) {
         float ao = texture(uOcclusionTexture, vUV).r;
         ambient *= mix(1.0, ao, uOcclusionStrength);
@@ -144,6 +152,6 @@ void main() {
         emissive *= texture(uEmissiveTexture, vUV).rgb;
     }
 
-    vec3 mapped = acesApprox(direct + ambient + emissive);
-    FragColor = vec4(pow(mapped, vec3(1.0 / 2.2)), 1.0);
+    // Stay linear and HDR until the postprocess composite pass.
+    FragColor = vec4(direct + ambient + emissive, 1.0);
 }

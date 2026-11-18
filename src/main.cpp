@@ -7,7 +7,10 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -59,8 +62,20 @@ private:
 struct Arguments {
     std::optional<std::uint64_t> frames;
     std::optional<std::filesystem::path> model;
+    std::optional<std::filesystem::path> screenshot;
+    engine2::RendererOptions renderer;
     bool help = false;
 };
+
+float parseSetting(const std::string& text, const char* setting, float minimum, float maximum) {
+    std::size_t parsed = 0;
+    const float value = std::stof(text, &parsed);
+    if (parsed != text.size() || !std::isfinite(value) ||
+        value < minimum || value > maximum) {
+        throw std::invalid_argument(std::string(setting) + " is out of range");
+    }
+    return value;
+}
 
 Arguments parseArgs(int argc, char** argv) {
     Arguments args;
@@ -77,11 +92,39 @@ Arguments parseArgs(int argc, char** argv) {
             args.frames = value;
         } else if (arg == "--model" && i + 1 < argc) {
             args.model = std::filesystem::path(argv[++i]);
+        } else if (arg == "--environment" && i + 1 < argc) {
+            args.renderer.hdrEnvironment = std::filesystem::path(argv[++i]);
+        } else if (arg == "--exposure" && i + 1 < argc) {
+            args.renderer.exposure = parseSetting(argv[++i], "--exposure", 0.05f, 16.0f);
+        } else if (arg == "--bloom" && i + 1 < argc) {
+            args.renderer.bloomStrength = parseSetting(argv[++i], "--bloom", 0.0f, 2.0f);
+        } else if (arg == "--screenshot" && i + 1 < argc) {
+            args.screenshot = std::filesystem::path(argv[++i]);
         } else {
             throw std::invalid_argument("Unknown or incomplete argument: " + arg);
         }
     }
     return args;
+}
+
+void saveScreenshot(const std::filesystem::path& path, int width, int height) {
+    std::vector<unsigned char> pixels(
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+
+    std::ofstream output(path, std::ios::binary);
+    if (!output) throw std::runtime_error("Cannot write screenshot: " + path.string());
+    output << "P6\n" << width << ' ' << height << "\n255\n";
+    for (int y = height - 1; y >= 0; --y) {
+        const auto* line = pixels.data() + static_cast<std::size_t>(y) * width * 3;
+        output.write(reinterpret_cast<const char*>(line),
+                     static_cast<std::streamsize>(width) * 3);
+    }
+    if (!output) throw std::runtime_error("Screenshot write failed: " + path.string());
+    std::cout << "Screenshot saved: " << path << '\n';
 }
 
 std::filesystem::path shaderDirectory(const char* executable) {
@@ -152,7 +195,7 @@ int run(int argc, char** argv) {
     });
 
     // All GL resources must be destroyed before GlfwSession destroys the context.
-    engine2::Renderer renderer(shaderDirectory(argv[0]));
+    engine2::Renderer renderer(shaderDirectory(argv[0]), args.renderer);
     std::optional<engine2::LoadedScene> imported;
     std::unique_ptr<engine2::Mesh> sphere;
     std::unique_ptr<engine2::Mesh> floor;
@@ -169,6 +212,10 @@ int run(int argc, char** argv) {
 
     double lastTime = glfwGetTime();
     bool previousTab = false;
+    bool previousLess = false;
+    bool previousMore = false;
+    bool previousBloom = false;
+    bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
         glfwPollEvents();
@@ -183,6 +230,19 @@ int run(int argc, char** argv) {
         }
         previousTab = tab;
 
+        const bool less = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+        const bool more = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+        const bool toggleBloom = glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS;
+        if (less && !previousLess) renderer.setExposure(renderer.exposure() / 1.2f);
+        if (more && !previousMore) renderer.setExposure(renderer.exposure() * 1.2f);
+        if (toggleBloom && !previousBloom) {
+            renderer.setBloomStrength(renderer.bloomStrength() > 0.0f
+                                         ? 0.0f : std::max(0.15f, args.renderer.bloomStrength));
+        }
+        previousLess = less;
+        previousMore = more;
+        previousBloom = toggleBloom;
+
         const double now = glfwGetTime();
         camera.update(window, static_cast<float>(now - lastTime));
         lastTime = now;
@@ -193,6 +253,11 @@ int run(int argc, char** argv) {
         if (width == 0 || height == 0) continue;
 
         renderer.render(camera, scene, width, height);
+        if (args.screenshot && !screenshotSaved &&
+            (!args.frames || rendered + 1 == *args.frames)) {
+            saveScreenshot(*args.screenshot, width, height);
+            screenshotSaved = true;
+        }
         glfwSwapBuffers(window);
         ++rendered;
     }
