@@ -14,8 +14,9 @@ vec3 acesApprox(vec3 color) {
 }
 
 void main() {
-    vec3 hdr = texture(uScene, vUV).rgb
-             + texture(uBloom, vUV).rgb * uBloomStrength;
+    vec3 hdr = texture(uScene, vUV).rgb;
+    if (uBloomStrength > 0.0)
+        hdr += texture(uBloom, vUV).rgb * uBloomStrength;
     vec3 mapped = acesApprox(hdr * max(uExposure, 0.001));
     // Default framebuffer is treated as linear; explicit gamma encodes sRGB.
     FragColor = vec4(pow(mapped, vec3(1.0 / 2.2)), 1.0);

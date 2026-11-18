@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.8.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.9.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,10 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(engine2_temporal_jitter_tests PRIVATE glm::glm)
     add_test(NAME temporal-jitter-unit COMMAND engine2_temporal_jitter_tests)
+    add_executable(engine2_exposure_tests tests/exposure_test.cpp)
+    target_include_directories(engine2_exposure_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME auto-exposure-unit COMMAND engine2_exposure_tests)
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -213,6 +217,16 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(taa-temporal-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Exercise true HDR luminance metering and multi-mip bloom with real
+        # OpenGL screenshots. Validate numeric effective exposure and pixels.
+        add_test(NAME exposure-bloom-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_exposure_bloom.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(exposure-bloom-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+
 
 
 

@@ -53,14 +53,23 @@
 - [x] CLI --taa / --taa-weight, клавиша T, статистика накопления
 - [x] Unit-тест Halton jitter и headless визуальные/диагностические проверки
 
-## v0.9 — детализация и производительность (план)
-- [ ] Motion vectors объектов и корректный TAA для движущихся мешей
-- [ ] Автоматическая HDR-экспозиция, multi-scale bloom
+## v0.9 — HDR-экспозиция и многоуровневый bloom (готово)
+- [x] GPU 128² log-luminance с редукцией mipmap до 1×1 и CPU чтением
+- [x] Geometric-mean auto-exposure, exponential time-based adaptation, ручная компенсация
+- [x] Переключение auto/manual, key, speed, экспозиционные счётчики
+- [x] Пять HDR уровней bloom с 13-tap downsample и tent upsample
+- [x] Мягкий порог bloom и GPU-совместимое отключение bloom при нулевой силе
+- [x] Исправлено: финальный композит действительно использует HDR после TAA
+- [x] Unit-тесты экспозиции, визуальные проверки HDR-адаптации и bloom
+
+## v1.0 — игровые объекты и производительность (план)
+- [ ] Motion vectors объектов и улучшение TAA для движущихся мешей
+- [ ] Scene/ECS, runtime-компоненты, физические объекты, игровой цикл
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions
-- [ ] Scene/ECS, редактор сцен и физические объекты
+- [ ] Async GPU exposure readback, visual golden-image тесты
 
-## v1.0+ — игровые системы (план)
+## v1.1+ — игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

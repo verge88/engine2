@@ -31,8 +31,12 @@ struct RenderItem {
 
 struct RendererOptions {
     std::optional<std::filesystem::path> hdrEnvironment;
-    float exposure = 1.0f;
+    float exposure = 1.0f;          // manual exposure / compensation multiplier
+    bool autoExposure = true;      // HDR geometric-mean metering
+    float exposureKey = 0.18f;     // middle-gray target
+    float exposureSpeed = 1.5f;    // smooth adaptation (per second)
     float bloomStrength = 0.15f;
+    float bloomThreshold = 1.0f;   // soft knee HDR luminance threshold
     bool ssao = true;
     bool frustumCulling = true;
     std::size_t pointShadowCount = 1; // first 0..2 point lights cast shadows
@@ -60,6 +64,9 @@ struct FrameStats {
     std::size_t alphaMaskedDrawCalls = 0;
     std::size_t alphaBlendedDrawCalls = 0;
     std::size_t taaHistoryFrames = 0;
+    float effectiveExposure = 1.0f;
+    float meteredExposure = 1.0f;
+    std::size_t bloomMipLevels = 0;
 };
 
 class Renderer {
@@ -71,7 +78,8 @@ public:
     Renderer& operator=(const Renderer&) = delete;
 
     void render(const Camera& camera, const std::vector<RenderItem>& items,
-                int framebufferWidth, int framebufferHeight);
+                int framebufferWidth, int framebufferHeight,
+                float deltaSeconds = 1.0f / 60.0f);
 
     void setPointLights(const std::vector<PointLight>& lights);
     void setPointShadowCount(std::size_t count);
@@ -92,6 +100,15 @@ public:
     [[nodiscard]] bool taa() const { return options_.taa; }
     void setTaaHistoryWeight(float weight);
     [[nodiscard]] float taaHistoryWeight() const { return options_.taaHistoryWeight; }
+
+    void setAutoExposure(bool enabled);
+    [[nodiscard]] bool autoExposure() const { return options_.autoExposure; }
+    void setExposureKey(float key);
+    [[nodiscard]] float exposureKey() const { return options_.exposureKey; }
+    void setExposureSpeed(float speed);
+    [[nodiscard]] float exposureSpeed() const { return options_.exposureSpeed; }
+    void setBloomThreshold(float threshold);
+    [[nodiscard]] float bloomThreshold() const { return options_.bloomThreshold; }
 
     void setExposure(float exposure);
     [[nodiscard]] float exposure() const { return options_.exposure; }
