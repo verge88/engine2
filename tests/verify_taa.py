@@ -19,15 +19,17 @@ def load_ppm(path: Path):
     return (width, height), rgb
 
 
-def run(xvfb: str, engine: str, directory: Path, enabled: bool):
-    mode = "on" if enabled else "off"
+def run(xvfb: str, engine: str, directory: Path,
+        enabled: bool, weight: float = 0.90):
+    mode = ("on" if enabled else "off") + f"-w{int(weight * 100):02d}"
     path = directory / f"taa-{mode}.ppm"
     cmd = [
         xvfb, "-a", engine,
         "--taa", "1" if enabled else "0",
-        "--taa-weight", "0.90", "--frames", "8",
+        "--taa-weight", str(weight), "--frames", "8",
         "--lights", "0", "--point-shadows", "0",
         "--sun-cascades", "1", "--ssao", "0", "--bloom", "0",
+        "--auto-exposure", "0",
         "--stats", "--screenshot", str(path),
     ]
     result = subprocess.run(
@@ -60,6 +62,20 @@ def main():
           f"channels changed >=5: {changed}/{total}")
     if average < 0.01 or changed < total // 4000:
         raise AssertionError("Temporal filtering produced no measurable pixel change")
+
+    # Same jitter and geometry, different history weights: verifies the
+    # resolved TAA texture actually feeds the final display composite.
+    dimensions_zero, pixels_zero = run(xvfb, engine, output, True, 0.0)
+    if dimensions_zero != dimensions_on:
+        raise AssertionError("TAA weight screenshots have mismatched dimensions")
+    change = [abs(a-b) for a,b in zip(pixels_on, pixels_zero)]
+    mean_history = sum(change) / len(change)
+    changed_history = sum(delta >= 5 for delta in change)
+    print(f"TAA history 0.9 vs 0.0 mean RGB delta={mean_history:.4f}; "
+          f"channels changed >=5: {changed_history}/{len(change)}")
+    if mean_history < 0.003 or changed_history < len(change) // 25000:
+        raise AssertionError("TAA history weight had no visible effect; "
+                             "the final composite may sample the raw HDR scene")
 
 
 if __name__ == "__main__":

@@ -253,9 +253,13 @@ void PostProcess::meterExposure(float key, float speed, float deltaSeconds) {
     drawTriangle();
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    // Finish the luminance FBO render pass before generating the texture's
+    // mip chain, then rebind the FBO for reading the 1x1 reduction result.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, luminanceTexture_);
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, luminanceFbo_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, luminanceTexture_,
                            luminanceMipLevels - 1);
