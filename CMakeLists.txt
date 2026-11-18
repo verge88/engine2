@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.7.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,6 +98,11 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(engine2_cascade_math_tests PRIVATE glm::glm)
     add_test(NAME cascade-math-unit COMMAND engine2_cascade_math_tests)
+    add_executable(engine2_temporal_jitter_tests tests/temporal_jitter_test.cpp)
+    target_include_directories(engine2_temporal_jitter_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_temporal_jitter_tests PRIVATE glm::glm)
+    add_test(NAME temporal-jitter-unit COMMAND engine2_temporal_jitter_tests)
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -199,6 +204,16 @@ if(BUILD_TESTING AND UNIX)
                     --lights 0 --ssao 0 --frames 1)
         set_tests_properties(sun-single-cascade-smoke PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # A real headless OpenGL app is run with TAA on/off for eight frames.
+        # Verify both temporal history progression and changed output pixels.
+        add_test(NAME taa-temporal-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_taa.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(taa-temporal-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+
 
 
         set_tests_properties(lighting-image-difference PROPERTIES
