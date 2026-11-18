@@ -18,8 +18,10 @@ struct LoadedScene {
     std::vector<RenderItem> items;
 };
 
-// Opaque triangle primitives, node transforms, UV0, tangents and core PBR textures.
-// No skinning, animations, morph targets, extensions, UV1 or alpha blending yet.
+// glTF triangle primitives, flattened node transforms, UV0, tangents, core
+// PBR textures and alpha OPAQUE/MASK/BLEND. Runtime Scene re-imports each
+// primitive's already-computed world transform as a separate entity.
+// No skinning, animations, morph targets, extensions or UV1 yet.
 LoadedScene loadGltf(const std::filesystem::path& path);
 
 } // namespace engine2

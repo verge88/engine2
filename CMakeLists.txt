@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.9.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,6 +57,7 @@ add_library(engine2_core STATIC
     src/AmbientOcclusion.cpp
     src/PointShadowMaps.cpp
     src/CascadedShadowMaps.cpp
+    src/Scene.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -107,6 +108,9 @@ if(BUILD_TESTING)
     target_include_directories(engine2_exposure_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_test(NAME auto-exposure-unit COMMAND engine2_exposure_tests)
+    add_executable(engine2_scene_tests tests/scene_test.cpp)
+    target_link_libraries(engine2_scene_tests PRIVATE engine2_core)
+    add_test(NAME scene-entities-physics-unit COMMAND engine2_scene_tests)
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -225,6 +229,15 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(exposure-bloom-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Two 12-frame scenes with/without a falling rigid body must retain
+        # correct entity counts and produce visibly different PPM screenshots.
+        add_test(NAME scene-physics-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_scene.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(scene-physics-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

@@ -62,14 +62,24 @@
 - [x] Исправлено: финальный композит действительно использует HDR после TAA
 - [x] Unit-тесты экспозиции, визуальные проверки HDR-адаптации и bloom
 
-## v1.0 — игровые объекты и производительность (план)
-- [ ] Motion vectors объектов и улучшение TAA для движущихся мешей
-- [ ] Scene/ECS, runtime-компоненты, физические объекты, игровой цикл
-- [ ] GPU profiling, cached shadow maps, instanced rendering
-- [ ] UV1 и KHR glTF extensions
-- [ ] Async GPU exposure readback, visual golden-image тесты
+## v1.0 — сущности игрового мира и фиксированное обновление (готово)
+- [x] Scene runtime с generation handles, именами и рекурсивным удалением
+- [x] Иерархия world/local transform с защитой от циклов и keepWorld reparent
+- [x] MeshRenderer и PointLight компоненты с извлечением для текущего рендерера
+- [x] RigidBody-компонент: гравитация, приближённая сфера/плоскость, отскок
+- [x] 1/60 fixed timestep с накоплением времени и ограничением числа шагов
+- [x] Интеграция procedural и glTF геометрии/освещения с Scene
+- [x] CLI physics demo, --sim-dt, SceneStats, unit- и visual-тесты
 
-## v1.1+ — игровые системы (план)
+## v1.1 — расширение игровых систем и производительность (план)
+- [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
+- [ ] Настоящий broadphase, shape colliders, контакты между объектами
+- [ ] Motion vectors объектов и улучшение TAA для движущихся мешей
+- [ ] Scene serialization и небольшой редактор/inspector
+- [ ] GPU profiling, cached shadow maps, instanced rendering
+- [ ] UV1 и KHR glTF extensions, async exposure readback
+
+## v1.2+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

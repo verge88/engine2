@@ -2,6 +2,7 @@
 #include "engine2/GltfLoader.hpp"
 #include "engine2/Mesh.hpp"
 #include "engine2/Renderer.hpp"
+#include "engine2/Scene.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -67,6 +68,8 @@ struct Arguments {
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
+    bool physicsDemo = false;
+    std::optional<float> simulationDelta;
     bool stats = false;
     bool help = false;
 };
@@ -116,6 +119,13 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.exposure = parseSetting(argv[++i], "--exposure", 0.05f, 16.0f);
         } else if (arg == "--bloom" && i + 1 < argc) {
             args.renderer.bloomStrength = parseSetting(argv[++i], "--bloom", 0.0f, 2.0f);
+        } else if (arg == "--physics-demo" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--physics-demo", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--physics-demo requires 0 or 1");
+            args.physicsDemo = value != 0.0f;
+        } else if (arg == "--sim-dt" && i + 1 < argc) {
+            args.simulationDelta = parseSetting(argv[++i], "--sim-dt", 0.0f, 0.25f);
         } else if (arg == "--lights" && i + 1 < argc) {
             const float value = parseSetting(argv[++i], "--lights", 0.0f, 8.0f);
             if (value != std::floor(value))
@@ -257,11 +267,15 @@ int run(int argc, char** argv) {
                      "               [--ssao 0|1] [--culling 0|1] [--auto-exposure 0|1]\n"
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
+                     "               [--physics-demo 0|1] [--sim-dt 0..0.25]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
         return 0;
     }
+
+    if (args.physicsDemo && args.model)
+        throw std::invalid_argument("--physics-demo requires procedural scene (without --model)");
 
     GlfwSession session;
     GLFWwindow* window = session.window();
@@ -292,15 +306,58 @@ int run(int argc, char** argv) {
     std::optional<engine2::LoadedScene> imported;
     std::unique_ptr<engine2::Mesh> sphere;
     std::unique_ptr<engine2::Mesh> floor;
-    std::vector<engine2::RenderItem> scene;
+    std::vector<engine2::RenderItem> initialScene;
     if (args.model) {
         imported.emplace(engine2::loadGltf(*args.model));
-        scene = imported->items;
-        if (scene.empty()) throw std::runtime_error("glTF scene has no renderable primitives");
+        initialScene = imported->items;
+        if (initialScene.empty()) throw std::runtime_error("glTF scene has no renderable primitives");
     } else {
         sphere = std::make_unique<engine2::Mesh>(engine2::Mesh::sphere());
         floor = std::make_unique<engine2::Mesh>(engine2::Mesh::plane());
-        scene = createScene(*sphere, *floor);
+        initialScene = createScene(*sphere, *floor);
+    }
+
+    // Runtime scene entities are the single source of render submissions.
+    // Render component pointers reference resources owned by imported or Mesh.
+    engine2::Scene world;
+    for (std::size_t i = 0; i < initialScene.size(); ++i) {
+        const engine2::RenderItem& item = initialScene[i];
+        const engine2::Entity entity =
+            world.createEntity("Mesh " + std::to_string(i));
+        world.setLocalTransform(entity, item.model);
+        world.setRenderer(entity, {item.mesh, item.material});
+    }
+
+    // Lights are regular scene entities with a local position and light
+    // component; their world-space positions are evaluated by Scene.
+    std::vector<engine2::Entity> lightEntities;
+    lightEntities.reserve(static_cast<std::size_t>(args.pointLights));
+    for (int i = 0; i < args.pointLights; ++i) {
+        lightEntities.push_back(
+            world.createEntity("Point Light " + std::to_string(i)));
+    }
+
+    // Optional playground for the fixed-step gravity + ground collision.
+    // Disabled by default to keep all previous glTF/screenshots comparable.
+    std::optional<engine2::Entity> fallingSphere;
+    if (args.physicsDemo) {
+        fallingSphere = world.createEntity("Physics Ball");
+        glm::mat4 transform = glm::translate(
+            glm::mat4(1.0f), glm::vec3(-1.05f, 3.4f, -1.05f));
+        transform = glm::scale(transform, glm::vec3(0.5f));
+        world.setLocalTransform(*fallingSphere, transform);
+
+        engine2::Material gold;
+        gold.albedo = glm::vec3(0.95f, 0.64f, 0.16f);
+        gold.metallic = 0.8f;
+        gold.roughness = 0.2f;
+        world.setRenderer(*fallingSphere, {sphere.get(), gold});
+
+        engine2::RigidBodyComponent body;
+        body.radius = 0.5f;
+        body.groundHeight = -1.0f;
+        body.restitution = 0.45f;
+        world.setRigidBody(*fallingSphere, body);
     }
 
     double lastTime = glfwGetTime();
@@ -364,9 +421,20 @@ int run(int argc, char** argv) {
         glfwGetFramebufferSize(window, &width, &height);
         if (width == 0 || height == 0) continue;
 
-        renderer.setPointLights(animatedLights(
-            args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now))));
-        renderer.render(camera, scene, width, height, frameDelta);
+        const auto lights = animatedLights(
+            args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now)));
+        for (std::size_t i = 0; i < lightEntities.size(); ++i) {
+            world.setLocalTransform(lightEntities[i],
+                glm::translate(glm::mat4(1.0f), lights[i].position));
+            engine2::PointLight localLight = lights[i];
+            localLight.position = glm::vec3(0.0f);
+            world.setPointLight(lightEntities[i], localLight);
+        }
+
+        // The render backend receives only extracted scene components.
+        (void)world.advance(args.simulationDelta.value_or(frameDelta));
+        renderer.setPointLights(world.pointLights());
+        renderer.render(camera, world.renderItems(), width, height, frameDelta);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
             saveScreenshot(*args.screenshot, width, height);
@@ -392,7 +460,17 @@ int run(int argc, char** argv) {
                   << " autoExposure=" << (renderer.autoExposure() ? 1 : 0)
                   << " meteredExposure=" << stats.meteredExposure
                   << " effectiveExposure=" << stats.effectiveExposure
-                  << " bloomLevels=" << stats.bloomMipLevels << '\n';
+                  << " bloomLevels=" << stats.bloomMipLevels;
+        const auto sceneStats = world.stats();
+        std::cout << " sceneEntities=" << sceneStats.entities
+                  << " sceneRenderables=" << sceneStats.renderables
+                  << " sceneLights=" << sceneStats.pointLights
+                  << " sceneBodies=" << sceneStats.rigidBodies
+                  << " sceneFixedSteps=" << sceneStats.fixedSteps;
+        if (fallingSphere) {
+            std::cout << " physicsY=" << world.worldTransform(*fallingSphere)[3][1];
+        }
+        std::cout << '\n';
     }
     return 0;
 }
