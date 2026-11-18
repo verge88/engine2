@@ -41,6 +41,9 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
       options_(std::move(options)) {
     setExposure(options_.exposure);
     setBloomStrength(options_.bloomStrength);
+    setBloomThreshold(options_.bloomThreshold);
+    setExposureKey(options_.exposureKey);
+    setExposureSpeed(options_.exposureSpeed);
     setPointShadowCount(options_.pointShadowCount);
     setSunCascades(options_.sunCascades);
     setSunShadowDistance(options_.sunShadowDistance);
@@ -65,6 +68,31 @@ void Renderer::setTaaHistoryWeight(float weight) {
     if (!std::isfinite(weight))
         throw std::invalid_argument("TAA history weight must be finite");
     options_.taaHistoryWeight = glm::clamp(weight, 0.0f, 0.98f);
+}
+
+
+void Renderer::setAutoExposure(bool enabled) {
+    if (options_.autoExposure == enabled) return;
+    options_.autoExposure = enabled;
+    postProcess_.resetExposure();
+}
+
+void Renderer::setExposureKey(float key) {
+    if (!std::isfinite(key) || key < 0.02f || key > 1.0f)
+        throw std::invalid_argument("Exposure key must be between 0.02 and 1.0");
+    options_.exposureKey = key;
+}
+
+void Renderer::setExposureSpeed(float speed) {
+    if (!std::isfinite(speed) || speed < 0.0f || speed > 12.0f)
+        throw std::invalid_argument("Exposure speed must be between 0 and 12");
+    options_.exposureSpeed = speed;
+}
+
+void Renderer::setBloomThreshold(float threshold) {
+    if (!std::isfinite(threshold) || threshold < 0.05f || threshold > 10.0f)
+        throw std::invalid_argument("Bloom threshold must be between 0.05 and 10");
+    options_.bloomThreshold = threshold;
 }
 
 void Renderer::setExposure(float exposure) {
@@ -99,7 +127,8 @@ void Renderer::setSunShadowDistance(float distance) {
 }
 
 void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items,
-                      int framebufferWidth, int framebufferHeight) {
+                      int framebufferWidth, int framebufferHeight,
+                      float deltaSeconds) {
     if (framebufferWidth <= 0 || framebufferHeight <= 0) return;
 
     const glm::mat4 view = camera.viewMatrix();
@@ -294,8 +323,16 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         Camera::farPlane, options_.taa, options_.taaHistoryWeight);
     stats_.taaHistoryFrames = postProcess_.temporalFrames();
 
-    // Pass 4: half-resolution bloom and filmic tonemapping into the display.
-    postProcess_.present(options_.exposure, options_.bloomStrength);
+    // Pass 4: geometric-mean HDR luminance metering, five-level bloom and ACES.
+    // Manual exposure multiplies the metered exposure in auto mode.
+    postProcess_.present(options_.exposure, options_.bloomStrength,
+                         options_.bloomThreshold, options_.autoExposure,
+                         options_.exposureKey, options_.exposureSpeed,
+                         std::clamp(deltaSeconds, 0.0f, 1.0f));
+    stats_.effectiveExposure = postProcess_.effectiveExposure();
+    stats_.meteredExposure = postProcess_.adaptedExposure();
+    stats_.bloomMipLevels = options_.bloomStrength > 0.0f
+        ? postProcess_.bloomMipCount() : 0;
 }
 
 } // namespace engine2

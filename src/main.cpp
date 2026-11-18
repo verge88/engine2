@@ -98,6 +98,20 @@ Arguments parseArgs(int argc, char** argv) {
             args.model = std::filesystem::path(argv[++i]);
         } else if (arg == "--environment" && i + 1 < argc) {
             args.renderer.hdrEnvironment = std::filesystem::path(argv[++i]);
+        } else if (arg == "--auto-exposure" && i + 1 < argc) {
+            const float setting = parseSetting(argv[++i], "--auto-exposure", 0.0f, 1.0f);
+            if (setting != std::floor(setting))
+                throw std::invalid_argument("--auto-exposure requires 0 or 1");
+            args.renderer.autoExposure = setting != 0.0f;
+        } else if (arg == "--exposure-key" && i + 1 < argc) {
+            args.renderer.exposureKey =
+                parseSetting(argv[++i], "--exposure-key", 0.02f, 1.0f);
+        } else if (arg == "--exposure-speed" && i + 1 < argc) {
+            args.renderer.exposureSpeed =
+                parseSetting(argv[++i], "--exposure-speed", 0.0f, 12.0f);
+        } else if (arg == "--bloom-threshold" && i + 1 < argc) {
+            args.renderer.bloomThreshold =
+                parseSetting(argv[++i], "--bloom-threshold", 0.05f, 10.0f);
         } else if (arg == "--exposure" && i + 1 < argc) {
             args.renderer.exposure = parseSetting(argv[++i], "--exposure", 0.05f, 16.0f);
         } else if (arg == "--bloom" && i + 1 < argc) {
@@ -240,10 +254,12 @@ int run(int argc, char** argv) {
     if (args.help) {
         std::cout << "Usage: engine2 [--model scene.glb] [--environment sky.hdr] [--frames N]\n"
                      "               [--lights 0..8] [--point-shadows 0..2] [--light-time seconds]\n"
-                     "               [--ssao 0|1] [--culling 0|1] [--exposure X] [--bloom X]\n"
+                     "               [--ssao 0|1] [--culling 0|1] [--auto-exposure 0|1]\n"
+                     "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
+                     "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
-                     "Shift sprint, wheel FOV, Tab cursor, Esc exit.\n";
+                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
         return 0;
     }
 
@@ -295,6 +311,7 @@ int run(int argc, char** argv) {
     bool previousOcclusion = false;
     bool previousCascadeDebug = false;
     bool previousTemporal = false;
+    bool previousAutoExposure = false;
     bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
@@ -332,9 +349,14 @@ int run(int argc, char** argv) {
         const bool toggleTaa = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
         if (toggleTaa && !previousTemporal) renderer.setTaa(!renderer.taa());
         previousTemporal = toggleTaa;
+        const bool toggleAutoExposure = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
+        if (toggleAutoExposure && !previousAutoExposure)
+            renderer.setAutoExposure(!renderer.autoExposure());
+        previousAutoExposure = toggleAutoExposure;
 
         const double now = glfwGetTime();
-        camera.update(window, static_cast<float>(now - lastTime));
+        const float frameDelta = static_cast<float>(now - lastTime);
+        camera.update(window, frameDelta);
         lastTime = now;
 
         int width = 0;
@@ -344,7 +366,7 @@ int run(int argc, char** argv) {
 
         renderer.setPointLights(animatedLights(
             args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now))));
-        renderer.render(camera, scene, width, height);
+        renderer.render(camera, scene, width, height, frameDelta);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
             saveScreenshot(*args.screenshot, width, height);
@@ -366,7 +388,11 @@ int run(int argc, char** argv) {
                   << " maskedDraws=" << stats.alphaMaskedDrawCalls
                   << " blendedDraws=" << stats.alphaBlendedDrawCalls
                   << " taa=" << (renderer.taa() ? 1 : 0)
-                  << " taaHistoryFrames=" << stats.taaHistoryFrames << '\n';
+                  << " taaHistoryFrames=" << stats.taaHistoryFrames
+                  << " autoExposure=" << (renderer.autoExposure() ? 1 : 0)
+                  << " meteredExposure=" << stats.meteredExposure
+                  << " effectiveExposure=" << stats.effectiveExposure
+                  << " bloomLevels=" << stats.bloomMipLevels << '\n';
     }
     return 0;
 }

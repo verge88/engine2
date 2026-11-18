@@ -1,14 +1,20 @@
 #include "engine2/PostProcess.hpp"
 
-#include <algorithm>
+#include "engine2/Exposure.hpp"
+
 #include <glm/geometric.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
 
 namespace engine2 {
 namespace {
+
+constexpr int luminanceResolution = 128;
+constexpr int luminanceMipLevels = 8; // 128 -> 64 -> ... -> 1
 
 void requireComplete(const char* stage) {
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
@@ -18,8 +24,8 @@ void requireComplete(const char* stage) {
 
 void allocateColor(GLuint texture, int width, int height) {
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F,
-                 width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+                 GL_RGBA, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -31,26 +37,34 @@ void allocateColor(GLuint texture, int width, int height) {
 PostProcess::PostProcess(const std::filesystem::path& shaderDirectory)
     : brightShader_(shaderDirectory / "fullscreen.vert",
                     shaderDirectory / "bloom-bright.frag"),
-      blurShader_(shaderDirectory / "fullscreen.vert",
-                  shaderDirectory / "bloom-blur.frag"),
+      downsampleShader_(shaderDirectory / "fullscreen.vert",
+                        shaderDirectory / "bloom-downsample.frag"),
+      upsampleShader_(shaderDirectory / "fullscreen.vert",
+                      shaderDirectory / "bloom-upsample.frag"),
       compositeShader_(shaderDirectory / "fullscreen.vert",
                        shaderDirectory / "composite.frag"),
       temporalShader_(shaderDirectory / "fullscreen.vert",
-                      shaderDirectory / "temporal-resolve.frag") {
+                      shaderDirectory / "temporal-resolve.frag"),
+      logLuminanceShader_(shaderDirectory / "fullscreen.vert",
+                          shaderDirectory / "log-luminance.frag") {
     glGenFramebuffers(1, &sceneFbo_);
     glGenTextures(1, &hdrTexture_);
     glGenTextures(1, &depthTexture_);
     glGenFramebuffers(2, temporalFbos_.data());
     glGenTextures(2, temporalTextures_.data());
-    glGenFramebuffers(2, blurFbos_.data());
-    glGenTextures(2, blurTextures_.data());
+    glGenFramebuffers(static_cast<GLsizei>(bloomLevels), bloomFbos_.data());
+    glGenTextures(static_cast<GLsizei>(bloomLevels), bloomTextures_.data());
+    glGenFramebuffers(1, &luminanceFbo_);
+    glGenTextures(1, &luminanceTexture_);
     glGenVertexArrays(1, &fullScreenVao_);
 }
 
 PostProcess::~PostProcess() {
     if (fullScreenVao_) glDeleteVertexArrays(1, &fullScreenVao_);
-    glDeleteTextures(2, blurTextures_.data());
-    glDeleteFramebuffers(2, blurFbos_.data());
+    if (luminanceTexture_) glDeleteTextures(1, &luminanceTexture_);
+    if (luminanceFbo_) glDeleteFramebuffers(1, &luminanceFbo_);
+    glDeleteTextures(static_cast<GLsizei>(bloomLevels), bloomTextures_.data());
+    glDeleteFramebuffers(static_cast<GLsizei>(bloomLevels), bloomFbos_.data());
     glDeleteTextures(2, temporalTextures_.data());
     glDeleteFramebuffers(2, temporalFbos_.data());
     if (depthTexture_) glDeleteTextures(1, &depthTexture_);
@@ -68,17 +82,15 @@ void PostProcess::resize(int framebufferWidth, int framebufferHeight) {
     if (width_ == framebufferWidth && height_ == framebufferHeight) return;
     width_ = framebufferWidth;
     height_ = framebufferHeight;
-    bloomWidth_ = std::max(1, width_ / 2);
-    bloomHeight_ = std::max(1, height_ / 2);
     resetTemporalHistory();
+    resetExposure();
 
     glBindFramebuffer(GL_FRAMEBUFFER, sceneFbo_);
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
     allocateColor(hdrTexture_, width_, height_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, hdrTexture_, 0);
-    // Texture instead of a renderbuffer: reprojection must sample
-    // the original rasterized depth at full output resolution.
+
     glBindTexture(GL_TEXTURE_2D, depthTexture_);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width_, height_,
                  0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -99,15 +111,41 @@ void PostProcess::resize(int framebufferWidth, int framebufferHeight) {
         requireComplete("temporal history");
     }
 
-    for (int i = 0; i < 2; ++i) {
-        glBindFramebuffer(GL_FRAMEBUFFER, blurFbos_[static_cast<std::size_t>(i)]);
+    int w = std::max(1, width_ / 2);
+    int h = std::max(1, height_ / 2);
+    for (std::size_t i = 0; i < bloomLevels; ++i) {
+        bloomWidths_[i] = w;
+        bloomHeights_[i] = h;
+        glBindFramebuffer(GL_FRAMEBUFFER, bloomFbos_[i]);
         glDrawBuffer(GL_COLOR_ATTACHMENT0);
-        allocateColor(blurTextures_[static_cast<std::size_t>(i)],
-                      bloomWidth_, bloomHeight_);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                               blurTextures_[static_cast<std::size_t>(i)], 0);
-        requireComplete("bloom");
+        allocateColor(bloomTextures_[i], w, h);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, bloomTextures_[i], 0);
+        requireComplete("bloom pyramid");
+        w = std::max(1, w / 2);
+        h = std::max(1, h / 2);
     }
+
+    // A single 128x128 log-luminance image with a full mip chain. Mipmap
+    // averaging of log(Y) computes an approximation of the geometric mean.
+    glBindTexture(GL_TEXTURE_2D, luminanceTexture_);
+    for (int mip = 0; mip < luminanceMipLevels; ++mip) {
+        const int side = luminanceResolution >> mip;
+        glTexImage2D(GL_TEXTURE_2D, mip, GL_R16F, side, side,
+                     0, GL_RED, GL_FLOAT, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, luminanceMipLevels - 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, luminanceFbo_);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, luminanceTexture_, 0);
+    requireComplete("log luminance");
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -130,6 +168,12 @@ void PostProcess::resetTemporalHistory() {
     temporalReadIndex_ = 0;
 }
 
+void PostProcess::resetExposure() {
+    exposureReady_ = false;
+    adaptedExposure_ = 1.0f;
+    effectiveExposure_ = 1.0f;
+}
+
 void PostProcess::resolveTemporal(const glm::mat4& viewProjection,
                                   const glm::vec3& cameraPosition,
                                   float nearPlane, float farPlane,
@@ -140,8 +184,6 @@ void PostProcess::resolveTemporal(const glm::mat4& viewProjection,
         return;
     }
 
-    // For large instantaneous camera teleports, reprojection history can
-    // be invalid even if projected UV/depth happen to match.
     if (hasTemporalHistory_ &&
         glm::distance(cameraPosition, previousCameraPosition_) > 3.0f) {
         resetTemporalHistory();
@@ -168,9 +210,8 @@ void PostProcess::resolveTemporal(const glm::mat4& viewProjection,
                              std::clamp(historyWeight, 0.0f, 0.98f));
     temporalShader_.setFloat("uNearPlane", nearPlane);
     temporalShader_.setFloat("uFarPlane", farPlane);
-
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, presentTexture_);
+    glBindTexture(GL_TEXTURE_2D, hdrTexture_);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, depthTexture_);
     glActiveTexture(GL_TEXTURE2);
@@ -194,45 +235,121 @@ void PostProcess::resolveTemporal(const glm::mat4& viewProjection,
     previousViewProjection_ = viewProjection;
 }
 
-void PostProcess::present(float exposure, float bloomStrength) {
+void PostProcess::meterExposure(float key, float speed, float deltaSeconds) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
     glDepthMask(GL_FALSE);
-    glViewport(0, 0, bloomWidth_, bloomHeight_);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, blurFbos_[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, luminanceFbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, luminanceTexture_, 0);
+    glViewport(0, 0, luminanceResolution, luminanceResolution);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    logLuminanceShader_.use();
+    logLuminanceShader_.setInt("uScene", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, presentTexture_);
+    drawTriangle();
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindTexture(GL_TEXTURE_2D, luminanceTexture_);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, luminanceTexture_,
+                           luminanceMipLevels - 1);
+    requireComplete("metered luminance mip");
+    float averageLogLuminance = 0.0f;
+    // A single 1x1 GPU->CPU readback per frame. This is easy to profile and
+    // replace with a deferred pixel transfer if it becomes a bottleneck.
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(0, 0, 1, 1, GL_RED, GL_FLOAT, &averageLogLuminance);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    if (!std::isfinite(averageLogLuminance)) return;
+    const float target = targetAutoExposure(averageLogLuminance, key);
+    if (!exposureReady_) {
+        adaptedExposure_ = target;
+        exposureReady_ = true;
+    } else {
+        adaptedExposure_ = adaptAutoExposure(
+            adaptedExposure_, target, speed, std::max(deltaSeconds, 0.0f));
+    }
+}
+
+void PostProcess::buildBloom(float threshold) {
+    glDisable(GL_BLEND);
+    glViewport(0, 0, bloomWidths_[0], bloomHeights_[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, bloomFbos_[0]);
     brightShader_.use();
     brightShader_.setInt("uScene", 0);
+    brightShader_.setFloat("uThreshold", threshold);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, presentTexture_);
     drawTriangle();
 
-    blurShader_.use();
-    blurShader_.setInt("uImage", 0);
-    for (int i = 0; i < 6; ++i) {
-        const bool horizontal = (i % 2 == 0);
-        const std::size_t target = horizontal ? 1 : 0;
-        const std::size_t source = horizontal ? 0 : 1;
-        glBindFramebuffer(GL_FRAMEBUFFER, blurFbos_[target]);
+    downsampleShader_.use();
+    downsampleShader_.setInt("uSource", 0);
+    for (std::size_t i = 1; i < bloomLevels; ++i) {
+        glViewport(0, 0, bloomWidths_[i], bloomHeights_[i]);
+        glBindFramebuffer(GL_FRAMEBUFFER, bloomFbos_[i]);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, blurTextures_[source]);
-        blurShader_.setVec2("uDirection",
-                            horizontal ? glm::vec2(1.0f, 0.0f)
-                                       : glm::vec2(0.0f, 1.0f));
+        glBindTexture(GL_TEXTURE_2D, bloomTextures_[i - 1]);
         drawTriangle();
     }
+
+    // Add tent-filtered small mips into progressively larger mips. Each
+    // pass reads a different texture than its framebuffer attachment.
+    upsampleShader_.use();
+    upsampleShader_.setInt("uSource", 0);
+    upsampleShader_.setFloat("uScatter", 0.72f);
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_ONE, GL_ONE);
+    for (std::size_t i = bloomLevels - 1; i > 0; --i) {
+        glViewport(0, 0, bloomWidths_[i - 1], bloomHeights_[i - 1]);
+        glBindFramebuffer(GL_FRAMEBUFFER, bloomFbos_[i - 1]);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, bloomTextures_[i]);
+        drawTriangle();
+    }
+    glDisable(GL_BLEND);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void PostProcess::present(float manualExposure, float bloomStrength,
+                          float bloomThreshold, bool autoExposure, float exposureKey,
+                          float adaptationSpeed, float deltaSeconds) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    if (autoExposure) {
+        meterExposure(exposureKey, adaptationSpeed, deltaSeconds);
+    } else {
+        resetExposure();
+    }
+    // Manual exposure remains an exposure-compensation multiplier in auto mode.
+    effectiveExposure_ = std::clamp(
+        manualExposure * adaptedExposure_, 0.01f, 64.0f);
+
+    if (bloomStrength > 0.0f) buildBloom(bloomThreshold);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, width_, height_);
     compositeShader_.use();
     compositeShader_.setInt("uScene", 0);
     compositeShader_.setInt("uBloom", 1);
-    compositeShader_.setFloat("uExposure", exposure);
+    compositeShader_.setFloat("uExposure", effectiveExposure_);
     compositeShader_.setFloat("uBloomStrength", bloomStrength);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, hdrTexture_);
+    // In v0.8 the composite accidentally sampled raw HDR: use resolved TAA!
+    glBindTexture(GL_TEXTURE_2D, presentTexture_);
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, blurTextures_[0]);
+    glBindTexture(GL_TEXTURE_2D, bloomTextures_[0]);
     drawTriangle();
 
     glBindTexture(GL_TEXTURE_2D, 0);
