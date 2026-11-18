@@ -1,36 +1,42 @@
 # engine2 — дорожная карта
 
-Цель — расширяемый собственный 3D-движок с фотореалистичным рендерингом. v0.2 — полноценный шаг к загрузке реальных ассетов, но не завершённый игровой движок.
+**Цель:** собственный расширяемый 3D-движок с реалистичным освещением и современным игровым pipeline. Поддержка PBR, HDR и IBL ещё не означает фотореализм во всех сценах.
 
-## 0.1 — минимальный рендерер (завершено)
+## v0.1 — основание (реализовано)
 
-- [x] C++20, CMake, OpenGL 3.3 Core, окно, ввод, камера
-- [x] Процедурная геометрия, metallic–roughness PBR GGX
-- [x] Directional shadow mapping + PCF, filmic tone mapping
+- [x] C++20, CMake, OpenGL 3.3, окно, ввод, камера
+- [x] Процедурные меши, GGX metallic–roughness, PCF shadow mapping
 
-## 0.2 — ресурсы и glTF (текущий этап)
+## v0.2 — ассеты (реализовано)
 
-- [x] glTF 2.0 (.gltf/.glb): меши, иерархия, трансформации, примитивы
-- [x] BaseColor, MetallicRoughness, Normal, AO, Emissive textures
-- [x] Gamma-correct sRGB / linear formats, sampler state и mipmaps
-- [x] Профиль smoke test с внешним glTF со встроенными изображениями
-- [ ] UV1, alpha modes, KHR extensions, sparse accessors
-- [ ] Кэш ресурсов между различными файлами, асинхронная загрузка
+- [x] glTF 2.0 .gltf/.glb, меши, иерархия, трансформации
+- [x] Base Color, Metallic/Roughness, Normal, AO, Emissive textures
+- [x] Раздельная обработка sRGB/linear, mipmaps, sampler settings
+- [x] Smoke tests для сцены с текстурами
 
-## 0.3 — высокое качество изображения
+## v0.3 — окружение и HDR (реализовано)
 
-- [ ] HDR environment: cubemap, diffuse irradiance, specular prefilter, BRDF LUT
-- [ ] HDR render targets + bloom, параметры экспозиции
-- [ ] Cascaded shadow maps + несколько источников света
-- [ ] SSAO, screen-space reflections, TAA
-- [ ] Frustum culling, instancing и профилирование GPU
+- [x] HDR Radiance панорама или процедурное HDR-небо
+- [x] Кубическая карта окружения, diffuse irradiance convolution
+- [x] GGX prefiltered specular cubemap + BRDF split-sum LUT
+- [x] HDR framebuffer (RGBA16F), skybox, exposure + ACES
+- [x] Bright-pass / 6-pass separable bloom на половине разрешения
+- [x] CLI для загрузки HDR, регулировки exposure/bloom и screenshot PPM
+- [x] Проверка содержимого итогового изображения в CI
 
-## 0.4+ — современные GPU и игровые системы
+## v0.4 — качество и ресурсный pipeline (следующий этап)
 
-- [ ] Vulkan/Direct3D 12 renderer backend и render graph
-- [ ] Ray-traced shadows, reflections, GI и совместимый fallback
-- [ ] Система Entity/Scene, editor, streaming, asset database
-- [ ] Физика, скелетная анимация, аудио, скрипты
-- [ ] Регрессионные image tests и оптимизация производительности
+- [ ] Alpha mask/blend, UV1, распространённые glTF KHR extensions
+- [ ] Отрисовка многих источников света, cascaded shadow maps
+- [ ] SSAO, TAA, SSR, HDR auto exposure, более качественный bloom
+- [ ] Асинхронный asset cache, background streaming
+- [ ] Render timings, GPU profiling, frustum culling/instancing
 
-Ограничения и тестирование актуальной версии документированы в README.
+## v0.5+ — игровые подсистемы и новые API
+
+- [ ] Scene/ECS, collision/physics, animation, audio, scripting/editor
+- [ ] Vulkan/D3D12 backend + render graph, ray-traced reflections/GI
+- [ ] Регрессионные golden image tests на известных GPU
+- [ ] Ландшафт, LOD, streaming, оптимизация больших сцен
+
+Ограничения и команды для проверки текущей версии — в README.

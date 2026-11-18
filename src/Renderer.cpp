@@ -3,9 +3,11 @@
 #include "engine2/Camera.hpp"
 #include "engine2/Mesh.hpp"
 
+#include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <stdexcept>
+#include <utility>
 
 namespace engine2 {
 namespace {
@@ -24,9 +26,14 @@ void setCulling(bool doubleSided) {
 
 } // namespace
 
-Renderer::Renderer(const std::filesystem::path& shaderDir)
+Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions options)
     : pbrShader_(shaderDir / "pbr.vert", shaderDir / "pbr.frag"),
-      shadowShader_(shaderDir / "shadow.vert", shaderDir / "shadow.frag") {
+      shadowShader_(shaderDir / "shadow.vert", shaderDir / "shadow.frag"),
+      environment_(shaderDir, options.hdrEnvironment),
+      postProcess_(shaderDir),
+      options_(std::move(options)) {
+    setExposure(options_.exposure);
+    setBloomStrength(options_.bloomStrength);
     lightDirection_ = glm::normalize(lightDirection_);
 
     glEnable(GL_DEPTH_TEST);
@@ -66,9 +73,21 @@ Renderer::~Renderer() {
     if (shadowFbo_ != 0) glDeleteFramebuffers(1, &shadowFbo_);
 }
 
+void Renderer::setExposure(float exposure) {
+    options_.exposure = glm::clamp(exposure, 0.05f, 16.0f);
+}
+
+void Renderer::setBloomStrength(float strength) {
+    options_.bloomStrength = glm::clamp(strength, 0.0f, 2.0f);
+}
+
 void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items,
                       int framebufferWidth, int framebufferHeight) {
     if (framebufferWidth <= 0 || framebufferHeight <= 0) return;
+
+    const glm::mat4 view = camera.viewMatrix();
+    const glm::mat4 projection = camera.projectionMatrix(
+        static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
 
     const glm::mat4 lightView = glm::lookAt(-lightDirection_ * 22.0f,
                                             glm::vec3(0.0f),
@@ -77,6 +96,7 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
                                                   0.1f, 60.0f);
     const glm::mat4 lightSpace = lightProjection * lightView;
 
+    // Pass 1: 2048x2048 directional depth map.
     glViewport(0, 0, shadowResolution_, shadowResolution_);
     glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo_);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -91,15 +111,14 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     }
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    glViewport(0, 0, framebufferWidth, framebufferHeight);
-    glClearColor(0.025f, 0.035f, 0.06f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // Pass 2: linear HDR color, cubemap sky, textured GGX + diffuse/specular IBL.
+    postProcess_.beginScene(framebufferWidth, framebufferHeight);
+    environment_.drawSky(view, projection, camera.position());
+
     pbrShader_.use();
-    pbrShader_.setMat4("uView", camera.viewMatrix());
-    pbrShader_.setMat4("uProjection", camera.projectionMatrix(
-        static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight)));
+    pbrShader_.setMat4("uView", view);
+    pbrShader_.setMat4("uProjection", projection);
     pbrShader_.setMat4("uLightSpace", lightSpace);
     pbrShader_.setVec3("uViewPos", camera.position());
     pbrShader_.setVec3("uLightDir", -lightDirection_);
@@ -110,9 +129,18 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     pbrShader_.setInt("uNormalTexture", 3);
     pbrShader_.setInt("uOcclusionTexture", 4);
     pbrShader_.setInt("uEmissiveTexture", 5);
+    pbrShader_.setInt("uIrradianceMap", 6);
+    pbrShader_.setInt("uPrefilterMap", 7);
+    pbrShader_.setInt("uBrdfLut", 8);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, shadowTexture_);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, environment_.irradianceMap());
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, environment_.prefilterMap());
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, environment_.brdfLut());
 
     for (const RenderItem& item : items) {
         if (!item.mesh) continue;
@@ -139,10 +167,14 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         item.mesh->draw();
     }
     glEnable(GL_CULL_FACE);
-    for (int unit = 5; unit >= 0; --unit) {
+    for (int unit = 8; unit >= 0; --unit) {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     }
+
+    // Pass 3: half-resolution bloom and filmic tonemapping into the display.
+    postProcess_.present(options_.exposure, options_.bloomStrength);
 }
 
 } // namespace engine2

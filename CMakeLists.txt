@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.2.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,8 @@ add_library(engine2_core STATIC
     src/Renderer.cpp
     src/Texture.cpp
     src/GltfLoader.cpp
+    src/Environment.cpp
+    src/PostProcess.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -69,8 +71,9 @@ if(MSVC)
 else()
     target_compile_options(engine2_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(engine2 PRIVATE -Wall -Wextra -Wpedantic)
-    # tinygltf's vendored JSON and stb headers are third-party code.
-    set_source_files_properties(src/GltfLoader.cpp PROPERTIES COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-missing-field-initializers")
+    # Third-party JSON and stb headers are compiled in GltfLoader.cpp.
+    set_source_files_properties(src/GltfLoader.cpp PROPERTIES
+        COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-missing-field-initializers")
 endif()
 
 add_custom_command(TARGET engine2 POST_BUILD
@@ -83,14 +86,24 @@ add_custom_command(TARGET engine2 POST_BUILD
 include(CTest)
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
     if(XVFB_RUN)
         add_test(NAME procedural-smoke
-            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --frames 3)
-        add_test(NAME gltf-smoke
-            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --model
-                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/textured-triangle.gltf"
-                    --frames 3)
-        set_tests_properties(procedural-smoke gltf-smoke PROPERTIES
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --frames 2)
+        add_test(NAME gltf-hdr-smoke
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                    --model "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/textured-triangle.gltf"
+                    --environment "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ambient.hdr"
+                    --frames 2)
+        add_test(NAME image-capture
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --frames 2
+                    --screenshot "${CMAKE_CURRENT_BINARY_DIR}/engine2-smoke.ppm")
+        add_test(NAME validate-image
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_ppm.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/engine2-smoke.ppm")
+        set_tests_properties(validate-image PROPERTIES DEPENDS image-capture)
+        set_tests_properties(procedural-smoke gltf-hdr-smoke image-capture PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
     endif()
 endif()
