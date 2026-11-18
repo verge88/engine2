@@ -317,7 +317,9 @@ int run(int argc, char** argv) {
                   << " visible=" << stats.visibleItems
                   << " culled=" << stats.culledItems
                   << " shadowDraws=" << stats.shadowDrawCalls
-                  << " geometryDraws=" << stats.geometryDrawCalls << '\n';
+                  << " geometryDraws=" << stats.geometryDrawCalls
+                  << " maskedDraws=" << stats.alphaMaskedDrawCalls
+                  << " blendedDraws=" << stats.alphaBlendedDrawCalls << '\n';
     }
     return 0;
 }

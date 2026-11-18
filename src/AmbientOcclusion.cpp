@@ -143,13 +143,23 @@ void AmbientOcclusion::render(const glm::mat4& view, const glm::mat4& projection
     geometryShader_.use();
     geometryShader_.setMat4("uView", view);
     geometryShader_.setMat4("uProjection", projection);
+    geometryShader_.setInt("uBaseColorTexture", 0);
     for (const auto& item : items) {
-        if (!item.mesh) continue;
+        if (!item.mesh || item.material.alphaMode == AlphaMode::Blend) continue;
         cull(item.material.doubleSided);
         geometryShader_.setMat4("uModel", item.model);
         geometryShader_.setInt("uDoubleSided", item.material.doubleSided ? 1 : 0);
+        geometryShader_.setInt("uAlphaMode", static_cast<int>(item.material.alphaMode));
+        geometryShader_.setFloat("uAlphaFactor", item.material.alpha);
+        geometryShader_.setFloat("uAlphaCutoff", item.material.alphaCutoff);
+        geometryShader_.setInt("uHasBaseColorTexture",
+                               item.material.baseColorTexture != 0 ? 1 : 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, item.material.baseColorTexture);
         item.mesh->draw();
     }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);

@@ -47,6 +47,8 @@ struct FrameStats {
     std::size_t culledItems = 0;
     std::size_t shadowDrawCalls = 0;
     std::size_t geometryDrawCalls = 0;
+    std::size_t alphaMaskedDrawCalls = 0;
+    std::size_t alphaBlendedDrawCalls = 0;
 };
 
 class Renderer {

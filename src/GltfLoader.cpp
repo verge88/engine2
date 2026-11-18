@@ -323,6 +323,18 @@ struct Context {
                 static_cast<float>(pbr.baseColorFactor[1]),
                 static_cast<float>(pbr.baseColorFactor[2]));
         }
+
+        if (pbr.baseColorFactor.size() >= 4) {
+            material.alpha = static_cast<float>(pbr.baseColorFactor[3]);
+        }
+        if (input.alphaMode == "MASK") {
+            material.alphaMode = AlphaMode::Mask;
+            material.alphaCutoff = static_cast<float>(input.alphaCutoff);
+        } else if (input.alphaMode == "BLEND") {
+            material.alphaMode = AlphaMode::Blend;
+        } else if (input.alphaMode != "OPAQUE") {
+            throw std::runtime_error("Unsupported glTF alphaMode: " + input.alphaMode);
+        }
         material.metallic = static_cast<float>(pbr.metallicFactor);
         material.roughness = static_cast<float>(pbr.roughnessFactor);
         if (input.emissiveFactor.size() >= 3) {
@@ -478,12 +490,6 @@ LoadedScene loadGltf(const std::filesystem::path& path) {
         for (const auto& primitive : model.meshes[i].primitives) {
             if (primitive.mode != -1 && primitive.mode != TINYGLTF_MODE_TRIANGLES) {
                 std::cerr << "glTF: skipping non-triangle primitive\n";
-                continue;
-            }
-            if (primitive.material >= 0 &&
-                static_cast<std::size_t>(primitive.material) < model.materials.size() &&
-                model.materials[static_cast<std::size_t>(primitive.material)].alphaMode != "OPAQUE") {
-                std::cerr << "glTF: skipping non-opaque primitive (alpha pipeline pending)\n";
                 continue;
             }
             if (!materials.contains(primitive.material)) {
