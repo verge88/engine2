@@ -8,6 +8,21 @@
 #include <stdexcept>
 
 namespace engine2 {
+namespace {
+
+void bindMaterialTexture(const Shader& shader, const char* activeName,
+                         GLuint texture, GLuint slot) {
+    shader.setInt(activeName, texture != 0 ? 1 : 0);
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, texture);
+}
+
+void setCulling(bool doubleSided) {
+    if (doubleSided) glDisable(GL_CULL_FACE);
+    else glEnable(GL_CULL_FACE);
+}
+
+} // namespace
 
 Renderer::Renderer(const std::filesystem::path& shaderDir)
     : pbrShader_(shaderDir / "pbr.vert", shaderDir / "pbr.frag"),
@@ -62,7 +77,6 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
                                                   0.1f, 60.0f);
     const glm::mat4 lightSpace = lightProjection * lightView;
 
-    // Pass 1: render depth from the sun's point of view.
     glViewport(0, 0, shadowResolution_, shadowResolution_);
     glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo_);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -71,13 +85,14 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     shadowShader_.setMat4("uLightSpace", lightSpace);
     for (const RenderItem& item : items) {
         if (!item.mesh) continue;
+        setCulling(item.material.doubleSided);
         shadowShader_.setMat4("uModel", item.model);
         item.mesh->draw();
     }
+    glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Pass 2: GGX PBR shading and filmic tonemapping.
     glViewport(0, 0, framebufferWidth, framebufferHeight);
     glClearColor(0.025f, 0.035f, 0.06f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -90,20 +105,44 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     pbrShader_.setVec3("uLightDir", -lightDirection_);
     pbrShader_.setVec3("uLightColor", glm::vec3(5.6f, 5.1f, 4.6f));
     pbrShader_.setInt("uShadowMap", 0);
+    pbrShader_.setInt("uBaseColorTexture", 1);
+    pbrShader_.setInt("uMetallicRoughnessTexture", 2);
+    pbrShader_.setInt("uNormalTexture", 3);
+    pbrShader_.setInt("uOcclusionTexture", 4);
+    pbrShader_.setInt("uEmissiveTexture", 5);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, shadowTexture_);
 
     for (const RenderItem& item : items) {
         if (!item.mesh) continue;
+        const Material& material = item.material;
+        setCulling(material.doubleSided);
         pbrShader_.setMat4("uModel", item.model);
-        pbrShader_.setVec3("uAlbedo", item.albedo);
-        pbrShader_.setFloat("uMetallic", item.metallic);
-        pbrShader_.setFloat("uRoughness", item.roughness);
-        pbrShader_.setInt("uChecker", item.checker ? 1 : 0);
+        pbrShader_.setVec3("uAlbedo", material.albedo);
+        pbrShader_.setFloat("uMetallic", material.metallic);
+        pbrShader_.setFloat("uRoughness", material.roughness);
+        pbrShader_.setVec3("uEmissive", material.emissive);
+        pbrShader_.setFloat("uOcclusionStrength", material.occlusionStrength);
+        pbrShader_.setFloat("uNormalScale", material.normalScale);
+        pbrShader_.setInt("uChecker", material.checker ? 1 : 0);
+        pbrShader_.setInt("uDoubleSided", material.doubleSided ? 1 : 0);
+        bindMaterialTexture(pbrShader_, "uHasBaseColorTexture",
+                            material.baseColorTexture, 1);
+        bindMaterialTexture(pbrShader_, "uHasMetallicRoughnessTexture",
+                            material.metallicRoughnessTexture, 2);
+        bindMaterialTexture(pbrShader_, "uHasNormalTexture", material.normalTexture, 3);
+        bindMaterialTexture(pbrShader_, "uHasOcclusionTexture",
+                            material.occlusionTexture, 4);
+        bindMaterialTexture(pbrShader_, "uHasEmissiveTexture",
+                            material.emissiveTexture, 5);
         item.mesh->draw();
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glEnable(GL_CULL_FACE);
+    for (int unit = 5; unit >= 0; --unit) {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
 }
 
 } // namespace engine2

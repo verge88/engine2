@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine2/Material.hpp"
 #include "engine2/Shader.hpp"
 
 #include <glad/gl.h>
@@ -17,10 +18,7 @@ class Mesh;
 struct RenderItem {
     const Mesh* mesh = nullptr;
     glm::mat4 model{1.0f};
-    glm::vec3 albedo{0.8f, 0.5f, 0.3f};
-    float metallic = 0.0f;
-    float roughness = 0.5f;
-    bool checker = false;
+    Material material{};
 };
 
 class Renderer {

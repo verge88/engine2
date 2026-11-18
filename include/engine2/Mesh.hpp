@@ -1,7 +1,9 @@
 #pragma once
 
 #include <glad/gl.h>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -9,8 +11,10 @@
 namespace engine2 {
 
 struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
+    glm::vec3 position{};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+    glm::vec2 uv{0.0f};
+    glm::vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f};
 };
 
 class Mesh {

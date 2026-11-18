@@ -1,36 +1,36 @@
 # engine2 — дорожная карта
 
-Цель — собственный расширяемый 3D-движок, который со временем сможет давать убедительную фотореалистичную картинку. Версия 0.1 — программный фундамент, а не заявление о готовом фотореализме.
+Цель — расширяемый собственный 3D-движок с фотореалистичным рендерингом. v0.2 — полноценный шаг к загрузке реальных ассетов, но не завершённый игровой движок.
 
-## 0.1 — минимальный рендерер (текущий этап)
+## 0.1 — минимальный рендерер (завершено)
 
-- [x] Кроссплатформенный CMake-проект C++20
-- [x] OpenGL 3.3 Core, окно, цикл, ввод, fly camera
-- [x] Процедурная геометрия, материал metallic/roughness
-- [x] Cook–Torrance GGX + directional shadows PCF
-- [x] Filmic tonemapping и smoke test
+- [x] C++20, CMake, OpenGL 3.3 Core, окно, ввод, камера
+- [x] Процедурная геометрия, metallic–roughness PBR GGX
+- [x] Directional shadow mapping + PCF, filmic tone mapping
 
-## 0.2 — ресурсы и настоящий material workflow
+## 0.2 — ресурсы и glTF (текущий этап)
 
-- [ ] Загрузчик glTF 2.0 (позиции, нормали, тангенты, UV, индексы)
-- [ ] PBR texture sets (base color, ORM, normal, emissive), sRGB/linear
-- [ ] Material/Texture/Model кеш, mipmaps, anisotropic filtering
-- [ ] HDR-окружение (equirectangular → cubemap), irradiance + prefilter + BRDF LUT
-- [ ] Нормальная модель сцены: Entity, Transform, MeshRenderer, Camera, Light
+- [x] glTF 2.0 (.gltf/.glb): меши, иерархия, трансформации, примитивы
+- [x] BaseColor, MetallicRoughness, Normal, AO, Emissive textures
+- [x] Gamma-correct sRGB / linear formats, sampler state и mipmaps
+- [x] Профиль smoke test с внешним glTF со встроенными изображениями
+- [ ] UV1, alpha modes, KHR extensions, sparse accessors
+- [ ] Кэш ресурсов между различными файлами, асинхронная загрузка
 
-## 0.3 — качество изображения и масштабирование
+## 0.3 — высокое качество изображения
 
-- [ ] Cascaded shadow maps, несколько источников света
-- [ ] HDR render targets, bloom, экспозиция
-- [ ] SSAO, screen-space reflections, temporal anti-aliasing
-- [ ] Frustum culling, instancing, profiling, ресурсы GPU
+- [ ] HDR environment: cubemap, diffuse irradiance, specular prefilter, BRDF LUT
+- [ ] HDR render targets + bloom, параметры экспозиции
+- [ ] Cascaded shadow maps + несколько источников света
+- [ ] SSAO, screen-space reflections, TAA
+- [ ] Frustum culling, instancing и профилирование GPU
 
-## 0.4+ — продвинутый рендеринг и игровые системы
+## 0.4+ — современные GPU и игровые системы
 
-- [ ] Vulkan/Direct3D 12 backend и render graph
-- [ ] Ray-traced shadows / reflections / GI с fallback
-- [ ] Система потоковой загрузки больших миров
-- [ ] Физика, анимация, аудио, скрипты, редактор
-- [ ] Регрессионные image tests, показатели производительности
+- [ ] Vulkan/Direct3D 12 renderer backend и render graph
+- [ ] Ray-traced shadows, reflections, GI и совместимый fallback
+- [ ] Система Entity/Scene, editor, streaming, asset database
+- [ ] Физика, скелетная анимация, аудио, скрипты
+- [ ] Регрессионные image tests и оптимизация производительности
 
-Порядок работ может изменяться по результатам профилирования и поддержки оборудования.
+Ограничения и тестирование актуальной версии документированы в README.
