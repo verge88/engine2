@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.6.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,6 +56,7 @@ add_library(engine2_core STATIC
     src/PostProcess.cpp
     src/AmbientOcclusion.cpp
     src/PointShadowMaps.cpp
+    src/CascadedShadowMaps.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -92,6 +93,11 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(engine2_frustum_tests PRIVATE glm::glm)
     add_test(NAME frustum-unit COMMAND engine2_frustum_tests)
+    add_executable(engine2_cascade_math_tests tests/cascade_math_test.cpp)
+    target_include_directories(engine2_cascade_math_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_cascade_math_tests PRIVATE glm::glm)
+    add_test(NAME cascade-math-unit COMMAND engine2_cascade_math_tests)
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -164,6 +170,36 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}/point-shadow-off.ppm")
         set_tests_properties(point-shadow-image-difference PROPERTIES
             DEPENDS "point-shadow-on-capture;point-shadow-off-capture")
+        # Compare directional shadows with an otherwise identical frame,
+        # and smoke-test the one-cascade and debug-visualization paths.
+        foreach(MODE three off)
+            if(MODE STREQUAL "three")
+                set(CASCADE_COUNT 3)
+            else()
+                set(CASCADE_COUNT 0)
+            endif()
+            add_test(NAME sun-shadow-${MODE}-capture
+                COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                        --sun-cascades ${CASCADE_COUNT} --sun-distance 95
+                        --lights 0 --ssao 0 --bloom 0 --frames 2
+                        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/sun-${MODE}.ppm")
+            set_tests_properties(sun-shadow-${MODE}-capture PROPERTIES
+                ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        endforeach()
+        add_test(NAME sun-shadow-image-difference
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_sun_cascades.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/sun-three.ppm"
+                    "${CMAKE_CURRENT_BINARY_DIR}/sun-off.ppm")
+        set_tests_properties(sun-shadow-image-difference PROPERTIES
+            DEPENDS "sun-shadow-three-capture;sun-shadow-off-capture")
+        add_test(NAME sun-single-cascade-smoke
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                    --sun-cascades 1 --sun-distance 60 --cascade-debug 1
+                    --lights 0 --ssao 0 --frames 1)
+        set_tests_properties(sun-single-cascade-smoke PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+
 
         set_tests_properties(lighting-image-difference PROPERTIES
             DEPENDS "image-capture;no-ssao-no-lights-smoke")

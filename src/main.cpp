@@ -107,6 +107,19 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--lights requires an integer 0..8");
             args.pointLights = static_cast<int>(value);
+        } else if (arg == "--sun-cascades" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--sun-cascades", 0.0f, 3.0f);
+            if (value != 0.0f && value != 1.0f && value != 3.0f)
+                throw std::invalid_argument("--sun-cascades requires 0, 1 or 3");
+            args.renderer.sunCascades = static_cast<int>(value);
+        } else if (arg == "--sun-distance" && i + 1 < argc) {
+            args.renderer.sunShadowDistance =
+                parseSetting(argv[++i], "--sun-distance", 5.0f, 150.0f);
+        } else if (arg == "--cascade-debug" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--cascade-debug", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--cascade-debug requires 0 or 1");
+            args.renderer.cascadeDebug = value != 0.0f;
         } else if (arg == "--point-shadows" && i + 1 < argc) {
             const float value = parseSetting(argv[++i], "--point-shadows", 0.0f, 2.0f);
             if (value != std::floor(value))
@@ -272,6 +285,7 @@ int run(int argc, char** argv) {
     bool previousMore = false;
     bool previousBloom = false;
     bool previousOcclusion = false;
+    bool previousCascadeDebug = false;
     bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
@@ -302,6 +316,10 @@ int run(int argc, char** argv) {
         const bool toggleOcclusion = glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
         if (toggleOcclusion && !previousOcclusion) renderer.setSsao(!renderer.ssao());
         previousOcclusion = toggleOcclusion;
+        const bool toggleCascade = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
+        if (toggleCascade && !previousCascadeDebug)
+            renderer.setCascadeDebug(!renderer.cascadeDebug());
+        previousCascadeDebug = toggleCascade;
 
         const double now = glfwGetTime();
         camera.update(window, static_cast<float>(now - lastTime));
@@ -328,6 +346,8 @@ int run(int argc, char** argv) {
         std::cout << "FrameStats submitted=" << stats.submittedItems
                   << " visible=" << stats.visibleItems
                   << " culled=" << stats.culledItems
+                  << " sunCascades=" << renderer.sunCascades()
+                  << " sunDistance=" << renderer.sunShadowDistance()
                   << " shadowDraws=" << stats.shadowDrawCalls
                   << " pointShadowDraws=" << stats.pointShadowDrawCalls
                   << " geometryDraws=" << stats.geometryDrawCalls

@@ -4,7 +4,7 @@ in vec3 vWorldPosition;
 in vec3 vNormal;
 in vec4 vTangent;
 in vec2 vUV;
-in vec4 vLightPosition;
+in float vViewDepth;
 
 out vec4 FragColor;
 
@@ -23,7 +23,11 @@ uniform float uNormalScale;
 uniform int uChecker;
 uniform int uDoubleSided;
 
-uniform sampler2D uShadowMap;
+uniform sampler2DArray uShadowMap;
+uniform mat4 uCascadeLightSpace[3];
+uniform float uCascadeFar[3];
+uniform int uCascadeCount;
+uniform int uDebugCascades;
 uniform sampler2D uBaseColorTexture;
 uniform sampler2D uMetallicRoughnessTexture;
 uniform sampler2D uNormalTexture;
@@ -82,25 +86,40 @@ vec3 fresnelSchlick(float cosTheta, vec3 f0) {
     return f0 + (1.0 - f0) * pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
 }
 
+int cascadeIndex() {
+    if (uCascadeCount <= 0) return -1;
+    for (int i = 0; i < 3; ++i) {
+        if (i >= uCascadeCount) break;
+        if (vViewDepth <= uCascadeFar[i]) return i;
+    }
+    return -1; // do not shadow geometry beyond the configured range
+}
+
 float shadowFactor(vec3 normal) {
-    vec3 projected = vLightPosition.xyz / vLightPosition.w;
-    projected = projected * 0.5 + 0.5;
+    int cascade = cascadeIndex();
+    if (cascade < 0) return 0.0;
+
+    vec4 clip = uCascadeLightSpace[cascade] * vec4(vWorldPosition, 1.0);
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
     if (projected.z > 1.0 || projected.z < 0.0) return 0.0;
     if (projected.x < 0.0 || projected.x > 1.0 ||
         projected.y < 0.0 || projected.y > 1.0) return 0.0;
 
-    float bias = max(0.003 * (1.0 - max(dot(normal, uLightDir), 0.0)), 0.0005);
-    vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0));
-    float shadow = 0.0;
+    // Bias is scaled by cascade resolution in projected coordinates.
+    // This reduces acne without relying on world-coordinate depth offsets.
+    float ndotl = max(dot(normal, uLightDir), 0.0);
+    float bias = max(0.0014 * (1.0 - ndotl), 0.00025);
+    vec2 texel = 1.0 / vec2(textureSize(uShadowMap, 0).xy);
+    float blocked = 0.0;
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
-            float depth = texture(uShadowMap, projected.xy + vec2(x, y) * texel).r;
-            shadow += (projected.z - bias > depth) ? 1.0 : 0.0;
+            float depth = texture(uShadowMap, vec3(
+                projected.xy + vec2(x, y) * texel, float(cascade))).r;
+            blocked += (projected.z - bias > depth) ? 1.0 : 0.0;
         }
     }
-    return shadow / 9.0;
+    return blocked / 9.0;
 }
-
 
 // Direct Cook-Torrance BRDF evaluated for the sun and for every point light.
 vec3 evaluateLight(vec3 N, vec3 V, vec3 L, vec3 radiance,
@@ -238,5 +257,15 @@ void main() {
     }
 
     // Stay linear and HDR until the postprocess composite pass.
-    FragColor = vec4(direct + ambient + emissive, clamp(alpha, 0.0, 1.0));
+    vec3 linearColor = direct + ambient + emissive;
+    if (uDebugCascades != 0) {
+        int index = cascadeIndex();
+        if (index >= 0) {
+            vec3 tint = index == 0 ? vec3(1.4, 0.65, 0.65) :
+                        index == 1 ? vec3(0.65, 1.4, 0.65) :
+                                     vec3(0.65, 0.65, 1.4);
+            linearColor *= mix(vec3(1.0), tint, 0.60);
+        }
+    }
+    FragColor = vec4(linearColor, clamp(alpha, 0.0, 1.0));
 }

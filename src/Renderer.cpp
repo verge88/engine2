@@ -32,7 +32,7 @@ void setCulling(bool doubleSided) {
 
 Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions options)
     : pbrShader_(shaderDir / "pbr.vert", shaderDir / "pbr.frag"),
-      shadowShader_(shaderDir / "shadow.vert", shaderDir / "shadow.frag"),
+      sunShadows_(shaderDir),
       environment_(shaderDir, options.hdrEnvironment),
       postProcess_(shaderDir),
       ambientOcclusion_(shaderDir),
@@ -41,6 +41,8 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
     setExposure(options_.exposure);
     setBloomStrength(options_.bloomStrength);
     setPointShadowCount(options_.pointShadowCount);
+    setSunCascades(options_.sunCascades);
+    setSunShadowDistance(options_.sunShadowDistance);
     lightDirection_ = glm::normalize(lightDirection_);
 
     glEnable(GL_DEPTH_TEST);
@@ -48,36 +50,6 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
     glCullFace(GL_BACK);
     glEnable(GL_MULTISAMPLE);
 
-    glGenFramebuffers(1, &shadowFbo_);
-    glGenTextures(1, &shadowTexture_);
-    glBindTexture(GL_TEXTURE_2D, shadowTexture_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, shadowResolution_, shadowResolution_,
-                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    const float border[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
-                           shadowTexture_, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
-    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        glDeleteTextures(1, &shadowTexture_);
-        glDeleteFramebuffers(1, &shadowFbo_);
-        throw std::runtime_error("Failed to create directional shadow framebuffer");
-    }
-}
-
-Renderer::~Renderer() {
-    if (shadowTexture_ != 0) glDeleteTextures(1, &shadowTexture_);
-    if (shadowFbo_ != 0) glDeleteFramebuffers(1, &shadowFbo_);
 }
 
 void Renderer::setExposure(float exposure) {
@@ -97,6 +69,18 @@ void Renderer::setPointLights(const std::vector<PointLight>& lights) {
 
 void Renderer::setPointShadowCount(std::size_t count) {
     options_.pointShadowCount = std::min(count, PointShadowMaps::maxShadowLights);
+}
+
+void Renderer::setSunCascades(int count) {
+    if (count != 0 && count != 1 && count != maxSunCascades)
+        throw std::invalid_argument("sun cascades must be 0, 1 or 3");
+    options_.sunCascades = count;
+}
+
+void Renderer::setSunShadowDistance(float distance) {
+    if (!std::isfinite(distance) || distance < 5.0f || distance > Camera::farPlane)
+        throw std::invalid_argument("sun shadow distance must be between 5 and 150");
+    options_.sunShadowDistance = distance;
 }
 
 void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items,
@@ -122,43 +106,13 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     }
     stats_.visibleItems = visible.size();
 
-    const glm::mat4 lightView = glm::lookAt(-lightDirection_ * 22.0f,
-                                            glm::vec3(0.0f),
-                                            glm::vec3(0.0f, 1.0f, 0.0f));
-    const glm::mat4 lightProjection = glm::ortho(-16.0f, 16.0f, -16.0f, 16.0f,
-                                                  0.1f, 60.0f);
-    const glm::mat4 lightSpace = lightProjection * lightView;
-
-    // Pass 1: 2048x2048 directional depth map.
-    glViewport(0, 0, shadowResolution_, shadowResolution_);
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo_);
-    glClear(GL_DEPTH_BUFFER_BIT);
-    glCullFace(GL_FRONT);
-    shadowShader_.use();
-    shadowShader_.setMat4("uLightSpace", lightSpace);
-    shadowShader_.setInt("uBaseColorTexture", 0);
-    const Frustum sunFrustum(lightSpace);
-    // Shadow casters include objects outside the camera but inside the sun
-    // frustum. BLEND is excluded: partial opacity needs a separate shadow model.
-    for (const RenderItem& item : items) {
-        if (!item.mesh || item.material.alphaMode == AlphaMode::Blend) continue;
-        if (!sunFrustum.intersects(item.mesh->bounds(), item.model)) continue;
-        setCulling(item.material.doubleSided);
-        shadowShader_.setMat4("uModel", item.model);
-        shadowShader_.setInt("uAlphaMode", static_cast<int>(item.material.alphaMode));
-        shadowShader_.setFloat("uAlphaFactor", item.material.alpha);
-        shadowShader_.setFloat("uAlphaCutoff", item.material.alphaCutoff);
-        shadowShader_.setInt("uHasBaseColorTexture",
-                             item.material.baseColorTexture != 0 ? 1 : 0);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, item.material.baseColorTexture);
-        item.mesh->draw();
-        ++stats_.shadowDrawCalls;
-    }
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
+    // Shadow atlas: 0/1/3 fitted sun cascades, clipped to the configured
+    // distance. Each layer is independently depth-rendered and culls against
+    // its own light-space frustum (including off-camera shadow casters).
+    stats_.shadowDrawCalls = sunShadows_.render(
+        view, projection, lightDirection_, items,
+        Camera::nearPlane, Camera::farPlane, options_.sunShadowDistance,
+        options_.sunCascades);
 
     // Pass 1b: six radial depth faces per shadow-enabled point light.
     // Off-camera casters remain: they can cast shadows into the visible frame.
@@ -178,7 +132,16 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     pbrShader_.use();
     pbrShader_.setMat4("uView", view);
     pbrShader_.setMat4("uProjection", projection);
-    pbrShader_.setMat4("uLightSpace", lightSpace);
+    pbrShader_.setInt("uCascadeCount", options_.sunCascades);
+    pbrShader_.setInt("uDebugCascades", options_.cascadeDebug ? 1 : 0);
+    const auto& cascadeData = sunShadows_.cascades();
+    for (int i = 0; i < options_.sunCascades; ++i) {
+        const std::string index = std::to_string(i);
+        pbrShader_.setMat4("uCascadeLightSpace[" + index + "]",
+                           cascadeData[static_cast<std::size_t>(i)].lightSpace);
+        pbrShader_.setFloat("uCascadeFar[" + index + "]",
+                            cascadeData[static_cast<std::size_t>(i)].farDistance);
+    }
     pbrShader_.setVec3("uViewPos", camera.position());
     pbrShader_.setVec3("uLightDir", -lightDirection_);
     pbrShader_.setVec3("uLightColor", glm::vec3(5.6f, 5.1f, 4.6f));
@@ -208,7 +171,7 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     }
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, shadowTexture_);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, sunShadows_.texture());
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_CUBE_MAP, environment_.irradianceMap());
     glActiveTexture(GL_TEXTURE7);
@@ -297,6 +260,7 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, 0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     }
 
     // Pass 3: half-resolution bloom and filmic tonemapping into the display.
