@@ -14,6 +14,9 @@ uniform vec3 uLightColor;
 uniform vec3 uAlbedo;
 uniform float uMetallic;
 uniform float uRoughness;
+uniform float uAlphaFactor;
+uniform float uAlphaCutoff;
+uniform int uAlphaMode; // 0=OPAQUE, 1=MASK, 2=BLEND
 uniform vec3 uEmissive;
 uniform float uOcclusionStrength;
 uniform float uNormalScale;
@@ -112,11 +115,17 @@ vec3 evaluateLight(vec3 N, vec3 V, vec3 L, vec3 radiance,
 }
 
 void main() {
+    // glTF baseColor RGB is sRGB-decoded by GL_SRGB8_ALPHA8; the texture
+    // alpha channel remains linear. OPAQUE ignores alpha by specification.
     vec3 baseColor = uAlbedo;
+    float alpha = uAlphaFactor;
     if (uHasBaseColorTexture != 0) {
-        // GL_SRGB8_ALPHA8 automatically converts the sample to linear space.
-        baseColor *= texture(uBaseColorTexture, vUV).rgb;
+        vec4 sampled = texture(uBaseColorTexture, vUV);
+        baseColor *= sampled.rgb;
+        alpha *= sampled.a;
     }
+    if (uAlphaMode == 1 && alpha < uAlphaCutoff) discard;
+    if (uAlphaMode != 2) alpha = 1.0;
     if (uChecker != 0) {
         vec2 cell = floor(vWorldPosition.xz * 0.5);
         float pattern = mod(cell.x + cell.y, 2.0);
@@ -191,5 +200,5 @@ void main() {
     }
 
     // Stay linear and HDR until the postprocess composite pass.
-    FragColor = vec4(direct + ambient + emissive, 1.0);
+    FragColor = vec4(direct + ambient + emissive, clamp(alpha, 0.0, 1.0));
 }

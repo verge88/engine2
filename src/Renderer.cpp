@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -129,16 +130,27 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glCullFace(GL_FRONT);
     shadowShader_.use();
     shadowShader_.setMat4("uLightSpace", lightSpace);
-    // Shadow casters must include all objects inside the light-space bounds,
-    // even if outside the camera frustum: offscreen casters may shadow onscreen.
+    shadowShader_.setInt("uBaseColorTexture", 0);
+    const Frustum sunFrustum(lightSpace);
+    // Shadow casters include objects outside the camera but inside the sun
+    // frustum. BLEND is excluded: partial opacity needs a separate shadow model.
     for (const RenderItem& item : items) {
-        if (!item.mesh) continue;
-        if (!Frustum(lightSpace).intersects(item.mesh->bounds(), item.model)) continue;
+        if (!item.mesh || item.material.alphaMode == AlphaMode::Blend) continue;
+        if (!sunFrustum.intersects(item.mesh->bounds(), item.model)) continue;
         setCulling(item.material.doubleSided);
         shadowShader_.setMat4("uModel", item.model);
+        shadowShader_.setInt("uAlphaMode", static_cast<int>(item.material.alphaMode));
+        shadowShader_.setFloat("uAlphaFactor", item.material.alpha);
+        shadowShader_.setFloat("uAlphaCutoff", item.material.alphaCutoff);
+        shadowShader_.setInt("uHasBaseColorTexture",
+                             item.material.baseColorTexture != 0 ? 1 : 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, item.material.baseColorTexture);
         item.mesh->draw();
         ++stats_.shadowDrawCalls;
     }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
@@ -190,13 +202,16 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, options_.ssao ? ambientOcclusion_.texture() : 0);
 
-    for (const RenderItem& item : visible) {
+    auto drawPbrItem = [&](const RenderItem& item) {
         const Material& material = item.material;
         setCulling(material.doubleSided);
         pbrShader_.setMat4("uModel", item.model);
         pbrShader_.setVec3("uAlbedo", material.albedo);
         pbrShader_.setFloat("uMetallic", material.metallic);
         pbrShader_.setFloat("uRoughness", material.roughness);
+        pbrShader_.setFloat("uAlphaFactor", material.alpha);
+        pbrShader_.setFloat("uAlphaCutoff", material.alphaCutoff);
+        pbrShader_.setInt("uAlphaMode", static_cast<int>(material.alphaMode));
         pbrShader_.setVec3("uEmissive", material.emissive);
         pbrShader_.setFloat("uOcclusionStrength", material.occlusionStrength);
         pbrShader_.setFloat("uNormalScale", material.normalScale);
@@ -213,6 +228,47 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
                             material.emissiveTexture, 5);
         item.mesh->draw();
         ++stats_.geometryDrawCalls;
+        if (material.alphaMode == AlphaMode::Mask) ++stats_.alphaMaskedDrawCalls;
+        if (material.alphaMode == AlphaMode::Blend) ++stats_.alphaBlendedDrawCalls;
+    };
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    // Opaque and alpha-masked draws establish depth before translucent items.
+    for (const RenderItem& item : visible) {
+        if (item.material.alphaMode == AlphaMode::Blend) continue;
+        drawPbrItem(item);
+    }
+
+    std::vector<const RenderItem*> transparent;
+    transparent.reserve(visible.size());
+    for (const RenderItem& item : visible) {
+        if (item.material.alphaMode == AlphaMode::Blend)
+            transparent.push_back(&item);
+    }
+    const glm::vec3 eye = camera.position();
+    const auto distanceSquared = [&](const RenderItem* item) {
+        const Bounds& b = item->mesh->bounds();
+        const glm::vec3 center = glm::vec3(
+            item->model * glm::vec4((b.min + b.max) * 0.5f, 1.0f));
+        const glm::vec3 delta = center - eye;
+        return glm::dot(delta, delta);
+    };
+    std::stable_sort(transparent.begin(), transparent.end(),
+        [&](const RenderItem* a, const RenderItem* b) {
+            return distanceSquared(a) > distanceSquared(b);
+        });
+
+    if (!transparent.empty()) {
+        // Blend only after the opaque depth buffer is populated. Sorted
+        // back-to-front; depth test stays on, depth *writes* stay off.
+        glEnable(GL_BLEND);
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        for (const RenderItem* item : transparent) drawPbrItem(*item);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
     }
     glEnable(GL_CULL_FACE);
     for (int unit = 9; unit >= 0; --unit) {

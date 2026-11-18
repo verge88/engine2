@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.4.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,6 +119,26 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_ppm.py"
                     "${CMAKE_CURRENT_BINARY_DIR}/engine2-smoke.ppm"
                     "${CMAKE_CURRENT_BINARY_DIR}/no-lights.ppm")
+        # Separate alpha-mode captures exercise the full glTF loader,
+        # PBR fragment discard, HDR blend ordering and cutout shadow path.
+        foreach(MODE opaque mask blend)
+            add_test(NAME alpha-${MODE}-capture
+                COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                        --model "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/alpha-${MODE}.gltf"
+                        --environment "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ambient.hdr"
+                        --ssao 0 --lights 0 --bloom 0 --frames 2 --stats
+                        --screenshot "${CMAKE_CURRENT_BINARY_DIR}/alpha-${MODE}.ppm")
+            set_tests_properties(alpha-${MODE}-capture PROPERTIES
+                ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        endforeach()
+        add_test(NAME alpha-modes-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_alpha.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/alpha-opaque.ppm"
+                    "${CMAKE_CURRENT_BINARY_DIR}/alpha-mask.ppm"
+                    "${CMAKE_CURRENT_BINARY_DIR}/alpha-blend.ppm")
+        set_tests_properties(alpha-modes-image-regression PROPERTIES
+            DEPENDS "alpha-opaque-capture;alpha-mask-capture;alpha-blend-capture")
         set_tests_properties(lighting-image-difference PROPERTIES
             DEPENDS "image-capture;no-ssao-no-lights-smoke")
         set_tests_properties(validate-image PROPERTIES DEPENDS image-capture)

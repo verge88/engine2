@@ -25,9 +25,10 @@
 - [x] Статистика отправленных, видимых и отброшенных примитивов
 - [x] Frustum unit tests + pixel comparisons on/off lighting
 
-## v0.5 — качество изображений и сцена (план)
+## v0.5 — прозрачные материалы и тесты (в работе)
 - [ ] Point shadow cubemaps, cascaded directional shadows
-- [ ] Alpha mask/blend, UV1, KHR glTF extensions
+- [x] Alpha MASK/BLEND glTF: cutout-тени и SSAO, сортировка blended мешей, тесты кадров
+- [ ] UV1, KHR glTF extensions
 - [ ] Temporal anti-aliasing и motion vectors
 - [ ] Auto exposure, более качественный multi-scale bloom
 - [ ] GPU profiling, asset caching, instanced rendering, culling hierarchy
