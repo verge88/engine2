@@ -4,6 +4,7 @@
 #include "engine2/Environment.hpp"
 #include "engine2/Material.hpp"
 #include "engine2/PostProcess.hpp"
+#include "engine2/PointShadowMaps.hpp"
 #include "engine2/Shader.hpp"
 
 #include <glad/gl.h>
@@ -32,6 +33,7 @@ struct RendererOptions {
     float bloomStrength = 0.15f;
     bool ssao = true;
     bool frustumCulling = true;
+    std::size_t pointShadowCount = 1; // first 0..2 point lights cast shadows
 };
 
 struct PointLight {
@@ -46,6 +48,7 @@ struct FrameStats {
     std::size_t visibleItems = 0;
     std::size_t culledItems = 0;
     std::size_t shadowDrawCalls = 0;
+    std::size_t pointShadowDrawCalls = 0;
     std::size_t geometryDrawCalls = 0;
     std::size_t alphaMaskedDrawCalls = 0;
     std::size_t alphaBlendedDrawCalls = 0;
@@ -64,6 +67,8 @@ public:
                 int framebufferWidth, int framebufferHeight);
 
     void setPointLights(const std::vector<PointLight>& lights);
+    void setPointShadowCount(std::size_t count);
+    [[nodiscard]] std::size_t pointShadowCount() const { return options_.pointShadowCount; }
     [[nodiscard]] const FrameStats& stats() const { return stats_; }
     void setSsao(bool enabled) { options_.ssao = enabled; }
     [[nodiscard]] bool ssao() const { return options_.ssao; }
@@ -82,6 +87,7 @@ private:
     Environment environment_;
     PostProcess postProcess_;
     AmbientOcclusion ambientOcclusion_;
+    PointShadowMaps pointShadowMaps_;
     RendererOptions options_;
     std::vector<PointLight> pointLights_;
     FrameStats stats_{};

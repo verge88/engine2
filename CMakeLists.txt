@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.5.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,7 @@ add_library(engine2_core STATIC
     src/Environment.cpp
     src/PostProcess.cpp
     src/AmbientOcclusion.cpp
+    src/PointShadowMaps.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -139,6 +140,31 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}/alpha-blend.ppm")
         set_tests_properties(alpha-modes-image-regression PROPERTIES
             DEPENDS "alpha-opaque-capture;alpha-mask-capture;alpha-blend-capture")
+        # Deterministic demo lights: the only difference between images is
+        # point-shadow visibility (not animation, SSAO or bloom).
+        foreach(MODE on off)
+            if(MODE STREQUAL "on")
+                set(SHADOW_COUNT 1)
+            else()
+                set(SHADOW_COUNT 0)
+            endif()
+            add_test(NAME point-shadow-${MODE}-capture
+                COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                        --lights 1 --point-shadows ${SHADOW_COUNT}
+                        --light-time 0 --ssao 0 --bloom 0 --frames 2
+                        --stats --screenshot
+                        "${CMAKE_CURRENT_BINARY_DIR}/point-shadow-${MODE}.ppm")
+            set_tests_properties(point-shadow-${MODE}-capture PROPERTIES
+                ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        endforeach()
+        add_test(NAME point-shadow-image-difference
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_point_shadows.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/point-shadow-on.ppm"
+                    "${CMAKE_CURRENT_BINARY_DIR}/point-shadow-off.ppm")
+        set_tests_properties(point-shadow-image-difference PROPERTIES
+            DEPENDS "point-shadow-on-capture;point-shadow-off-capture")
+
         set_tests_properties(lighting-image-difference PROPERTIES
             DEPENDS "image-capture;no-ssao-no-lights-smoke")
         set_tests_properties(validate-image PROPERTIES DEPENDS image-capture)

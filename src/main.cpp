@@ -66,6 +66,7 @@ struct Arguments {
     std::optional<std::filesystem::path> screenshot;
     engine2::RendererOptions renderer;
     int pointLights = 3;
+    std::optional<float> fixedLightTime;
     bool stats = false;
     bool help = false;
 };
@@ -106,6 +107,13 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--lights requires an integer 0..8");
             args.pointLights = static_cast<int>(value);
+        } else if (arg == "--point-shadows" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--point-shadows", 0.0f, 2.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--point-shadows requires an integer 0..2");
+            args.renderer.pointShadowCount = static_cast<std::size_t>(value);
+        } else if (arg == "--light-time" && i + 1 < argc) {
+            args.fixedLightTime = parseSetting(argv[++i], "--light-time", 0.0f, 1000000.0f);
         } else if (arg == "--ssao" && i + 1 < argc) {
             const float value = parseSetting(argv[++i], "--ssao", 0.0f, 1.0f);
             if (value != std::floor(value))
@@ -209,7 +217,10 @@ std::vector<engine2::RenderItem> createScene(const engine2::Mesh& sphere,
 int run(int argc, char** argv) {
     const Arguments args = parseArgs(argc, argv);
     if (args.help) {
-        std::cout << "Usage: engine2 [--model path/to/scene.gltf|.glb] [--frames N]\n";
+        std::cout << "Usage: engine2 [--model scene.glb] [--environment sky.hdr] [--frames N]\n"
+                     "               [--lights 0..8] [--point-shadows 0..2] [--light-time seconds]\n"
+                     "               [--ssao 0|1] [--culling 0|1] [--exposure X] [--bloom X]\n"
+                     "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, Tab cursor, Esc exit.\n";
         return 0;
@@ -301,7 +312,8 @@ int run(int argc, char** argv) {
         glfwGetFramebufferSize(window, &width, &height);
         if (width == 0 || height == 0) continue;
 
-        renderer.setPointLights(animatedLights(args.pointLights, now));
+        renderer.setPointLights(animatedLights(
+            args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now))));
         renderer.render(camera, scene, width, height);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
@@ -317,6 +329,7 @@ int run(int argc, char** argv) {
                   << " visible=" << stats.visibleItems
                   << " culled=" << stats.culledItems
                   << " shadowDraws=" << stats.shadowDrawCalls
+                  << " pointShadowDraws=" << stats.pointShadowDrawCalls
                   << " geometryDraws=" << stats.geometryDrawCalls
                   << " maskedDraws=" << stats.alphaMaskedDrawCalls
                   << " blendedDraws=" << stats.alphaBlendedDrawCalls << '\n';
