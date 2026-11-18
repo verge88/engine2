@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -64,6 +65,8 @@ struct Arguments {
     std::optional<std::filesystem::path> model;
     std::optional<std::filesystem::path> screenshot;
     engine2::RendererOptions renderer;
+    int pointLights = 3;
+    bool stats = false;
     bool help = false;
 };
 
@@ -98,6 +101,23 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.exposure = parseSetting(argv[++i], "--exposure", 0.05f, 16.0f);
         } else if (arg == "--bloom" && i + 1 < argc) {
             args.renderer.bloomStrength = parseSetting(argv[++i], "--bloom", 0.0f, 2.0f);
+        } else if (arg == "--lights" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--lights", 0.0f, 8.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--lights requires an integer 0..8");
+            args.pointLights = static_cast<int>(value);
+        } else if (arg == "--ssao" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--ssao", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--ssao requires 0 or 1");
+            args.renderer.ssao = value != 0.0f;
+        } else if (arg == "--culling" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--culling", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--culling requires 0 or 1");
+            args.renderer.frustumCulling = value != 0.0f;
+        } else if (arg == "--stats") {
+            args.stats = true;
         } else if (arg == "--screenshot" && i + 1 < argc) {
             args.screenshot = std::filesystem::path(argv[++i]);
         } else {
@@ -130,6 +150,31 @@ void saveScreenshot(const std::filesystem::path& path, int width, int height) {
 std::filesystem::path shaderDirectory(const char* executable) {
     const auto executableDir = std::filesystem::absolute(executable).parent_path();
     return executableDir / "shaders";
+}
+
+std::vector<engine2::PointLight> animatedLights(int count, double seconds) {
+    constexpr std::array<glm::vec3, 8> palette{{
+        {1.00f, 0.22f, 0.14f}, {0.10f, 0.42f, 1.00f},
+        {1.00f, 0.80f, 0.32f}, {0.30f, 1.00f, 0.52f},
+        {0.92f, 0.27f, 0.90f}, {0.40f, 0.86f, 1.00f},
+        {1.00f, 0.58f, 0.28f}, {0.76f, 0.67f, 1.00f}
+    }};
+    std::vector<engine2::PointLight> lights;
+    lights.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        const float phase = static_cast<float>(i) * 6.2831853f /
+                            static_cast<float>(std::max(count, 1));
+        const float angle = phase + static_cast<float>(seconds) * 0.18f;
+        engine2::PointLight light;
+        light.position = glm::vec3(std::cos(angle) * 4.2f,
+                                    2.4f + std::sin(angle * 1.7f) * 0.4f,
+                                    std::sin(angle) * 4.2f);
+        light.color = palette[static_cast<std::size_t>(i)];
+        light.intensity = 52.0f;
+        light.range = 9.0f;
+        lights.push_back(light);
+    }
+    return lights;
 }
 
 std::vector<engine2::RenderItem> createScene(const engine2::Mesh& sphere,
@@ -215,6 +260,7 @@ int run(int argc, char** argv) {
     bool previousLess = false;
     bool previousMore = false;
     bool previousBloom = false;
+    bool previousOcclusion = false;
     bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
@@ -242,6 +288,9 @@ int run(int argc, char** argv) {
         previousLess = less;
         previousMore = more;
         previousBloom = toggleBloom;
+        const bool toggleOcclusion = glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
+        if (toggleOcclusion && !previousOcclusion) renderer.setSsao(!renderer.ssao());
+        previousOcclusion = toggleOcclusion;
 
         const double now = glfwGetTime();
         camera.update(window, static_cast<float>(now - lastTime));
@@ -252,6 +301,7 @@ int run(int argc, char** argv) {
         glfwGetFramebufferSize(window, &width, &height);
         if (width == 0 || height == 0) continue;
 
+        renderer.setPointLights(animatedLights(args.pointLights, now));
         renderer.render(camera, scene, width, height);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
@@ -260,6 +310,14 @@ int run(int argc, char** argv) {
         }
         glfwSwapBuffers(window);
         ++rendered;
+    }
+    if (args.stats) {
+        const auto& stats = renderer.stats();
+        std::cout << "FrameStats submitted=" << stats.submittedItems
+                  << " visible=" << stats.visibleItems
+                  << " culled=" << stats.culledItems
+                  << " shadowDraws=" << stats.shadowDrawCalls
+                  << " geometryDraws=" << stats.geometryDrawCalls << '\n';
     }
     return 0;
 }

@@ -1,12 +1,15 @@
 #include "engine2/Renderer.hpp"
 
 #include "engine2/Camera.hpp"
+#include "engine2/Frustum.hpp"
 #include "engine2/Mesh.hpp"
 
 #include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace engine2 {
@@ -31,6 +34,7 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
       shadowShader_(shaderDir / "shadow.vert", shaderDir / "shadow.frag"),
       environment_(shaderDir, options.hdrEnvironment),
       postProcess_(shaderDir),
+      ambientOcclusion_(shaderDir),
       options_(std::move(options)) {
     setExposure(options_.exposure);
     setBloomStrength(options_.bloomStrength);
@@ -81,6 +85,13 @@ void Renderer::setBloomStrength(float strength) {
     options_.bloomStrength = glm::clamp(strength, 0.0f, 2.0f);
 }
 
+void Renderer::setPointLights(const std::vector<PointLight>& lights) {
+    constexpr std::size_t maxPointLights = 8;
+    pointLights_.assign(lights.begin(),
+                         lights.begin() + static_cast<std::ptrdiff_t>(
+                             std::min(lights.size(), maxPointLights)));
+}
+
 void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items,
                       int framebufferWidth, int framebufferHeight) {
     if (framebufferWidth <= 0 || framebufferHeight <= 0) return;
@@ -88,6 +99,21 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     const glm::mat4 view = camera.viewMatrix();
     const glm::mat4 projection = camera.projectionMatrix(
         static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
+
+    stats_ = {};
+    stats_.submittedItems = items.size();
+    std::vector<RenderItem> visible;
+    visible.reserve(items.size());
+    const Frustum frustum(projection * view);
+    for (const auto& item : items) {
+        if (!item.mesh) continue;
+        if (options_.frustumCulling && !frustum.intersects(item.mesh->bounds(), item.model)) {
+            ++stats_.culledItems;
+            continue;
+        }
+        visible.push_back(item);
+    }
+    stats_.visibleItems = visible.size();
 
     const glm::mat4 lightView = glm::lookAt(-lightDirection_ * 22.0f,
                                             glm::vec3(0.0f),
@@ -103,16 +129,24 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glCullFace(GL_FRONT);
     shadowShader_.use();
     shadowShader_.setMat4("uLightSpace", lightSpace);
+    // Shadow casters must include all objects inside the light-space bounds,
+    // even if outside the camera frustum: offscreen casters may shadow onscreen.
     for (const RenderItem& item : items) {
         if (!item.mesh) continue;
+        if (!Frustum(lightSpace).intersects(item.mesh->bounds(), item.model)) continue;
         setCulling(item.material.doubleSided);
         shadowShader_.setMat4("uModel", item.model);
         item.mesh->draw();
+        ++stats_.shadowDrawCalls;
     }
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
     // Pass 2: linear HDR color, cubemap sky, textured GGX + diffuse/specular IBL.
+    if (options_.ssao) {
+        ambientOcclusion_.render(view, projection, visible,
+                                 framebufferWidth, framebufferHeight);
+    }
     postProcess_.beginScene(framebufferWidth, framebufferHeight);
     environment_.drawSky(view, projection, camera.position());
 
@@ -132,6 +166,18 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     pbrShader_.setInt("uIrradianceMap", 6);
     pbrShader_.setInt("uPrefilterMap", 7);
     pbrShader_.setInt("uBrdfLut", 8);
+    pbrShader_.setInt("uSSAOTex", 9);
+    pbrShader_.setInt("uUseSSAO", options_.ssao ? 1 : 0);
+    pbrShader_.setVec2("uViewport", glm::vec2(
+        static_cast<float>(framebufferWidth), static_cast<float>(framebufferHeight)));
+    pbrShader_.setInt("uPointLightCount", static_cast<int>(pointLights_.size()));
+    for (std::size_t i = 0; i < pointLights_.size(); ++i) {
+        const std::string name = "uPointLights[" + std::to_string(i) + "].";
+        pbrShader_.setVec3(name + "position", pointLights_[i].position);
+        pbrShader_.setVec3(name + "color", pointLights_[i].color);
+        pbrShader_.setFloat(name + "intensity", pointLights_[i].intensity);
+        pbrShader_.setFloat(name + "range", pointLights_[i].range);
+    }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, shadowTexture_);
@@ -141,9 +187,10 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     glBindTexture(GL_TEXTURE_CUBE_MAP, environment_.prefilterMap());
     glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_2D, environment_.brdfLut());
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, options_.ssao ? ambientOcclusion_.texture() : 0);
 
-    for (const RenderItem& item : items) {
-        if (!item.mesh) continue;
+    for (const RenderItem& item : visible) {
         const Material& material = item.material;
         setCulling(material.doubleSided);
         pbrShader_.setMat4("uModel", item.model);
@@ -165,9 +212,10 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         bindMaterialTexture(pbrShader_, "uHasEmissiveTexture",
                             material.emissiveTexture, 5);
         item.mesh->draw();
+        ++stats_.geometryDrawCalls;
     }
     glEnable(GL_CULL_FACE);
-    for (int unit = 8; unit >= 0; --unit) {
+    for (int unit = 9; unit >= 0; --unit) {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, 0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);

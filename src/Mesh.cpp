@@ -20,6 +20,13 @@ Mesh::Mesh(std::vector<Vertex> vertices, std::vector<std::uint32_t> indices) {
         throw std::length_error("Mesh has too many indices");
     }
 
+    bounds_.min = vertices.front().position;
+    bounds_.max = vertices.front().position;
+    for (const Vertex& vertex : vertices) {
+        bounds_.min = glm::min(bounds_.min, vertex.position);
+        bounds_.max = glm::max(bounds_.max, vertex.position);
+    }
+
     indexCount_ = static_cast<GLsizei>(indices.size());
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
@@ -58,7 +65,8 @@ Mesh::Mesh(Mesh&& other) noexcept
     : vao_(std::exchange(other.vao_, 0)),
       vbo_(std::exchange(other.vbo_, 0)),
       ebo_(std::exchange(other.ebo_, 0)),
-      indexCount_(std::exchange(other.indexCount_, 0)) {}
+      indexCount_(std::exchange(other.indexCount_, 0)),
+      bounds_(other.bounds_) {}
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept {
     if (this != &other) {
@@ -67,6 +75,7 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
         vbo_ = std::exchange(other.vbo_, 0);
         ebo_ = std::exchange(other.ebo_, 0);
         indexCount_ = std::exchange(other.indexCount_, 0);
+        bounds_ = other.bounds_;
     }
     return *this;
 }

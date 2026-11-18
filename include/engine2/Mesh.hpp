@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine2/Frustum.hpp"
+
 #include <glad/gl.h>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -28,6 +30,7 @@ public:
     Mesh& operator=(Mesh&& other) noexcept;
 
     void draw() const;
+    [[nodiscard]] const Bounds& bounds() const { return bounds_; }
 
     [[nodiscard]] static Mesh sphere(unsigned int sectors = 48, unsigned int stacks = 32);
     [[nodiscard]] static Mesh plane();
@@ -39,6 +42,7 @@ private:
     GLuint vbo_ = 0;
     GLuint ebo_ = 0;
     GLsizei indexCount_ = 0;
+    Bounds bounds_{};
 };
 
 } // namespace engine2

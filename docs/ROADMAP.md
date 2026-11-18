@@ -1,42 +1,43 @@
-# engine2 — дорожная карта
+# engine2 — план развития
 
-**Цель:** собственный расширяемый 3D-движок с реалистичным освещением и современным игровым pipeline. Поддержка PBR, HDR и IBL ещё не означает фотореализм во всех сценах.
+Наша цель — расширяемый собственный C++ 3D-движок. Каждая версия добавляет конкретные тестируемые возможности; PBR/HDR/SSAO не делают картинку фотореалистичной автоматически.
 
-## v0.1 — основание (реализовано)
+## v0.1 — база (готово)
+- [x] C++20, CMake, OpenGL 3.3 Core, камера/окно/ввод
+- [x] Процедурная геометрия, GGX direct light, directional PCF shadow map
 
-- [x] C++20, CMake, OpenGL 3.3, окно, ввод, камера
-- [x] Процедурные меши, GGX metallic–roughness, PCF shadow mapping
+## v0.2 — загрузка объектов (готово)
+- [x] glTF 2.0 meshes/nodes/UV0/normals/tangents, embedded/external images
+- [x] Base color, metallic/roughness, normal, AO, emissive
+- [x] Загрузка моделей .gltf / .glb и smoke tests
 
-## v0.2 — ассеты (реализовано)
+## v0.3 — HDR и IBL (готово)
+- [x] HDR radiance panorama, cubemap, diffuse irradiance, GGX prefilter, BRDF LUT
+- [x] RGBA16F, bloom, exposure, ACES tonemapping
+- [x] CLI screenshot и проверка непустого изображения
 
-- [x] glTF 2.0 .gltf/.glb, меши, иерархия, трансформации
-- [x] Base Color, Metallic/Roughness, Normal, AO, Emissive textures
-- [x] Раздельная обработка sRGB/linear, mipmaps, sampler settings
-- [x] Smoke tests для сцены с текстурами
+## v0.4 — динамическое освещение и отсечение (готово)
+- [x] 0..8 точечных источников с обратноквадратичным затуханием (без локальных теней)
+- [x] Движущиеся цветные источники для демонстрационной сцены
+- [x] SSAO half resolution, 16 sample kernel, edge-aware blur, toggle
+- [x] Local AABB + world-space frustum culling с учётом scale/rotation
+- [x] Отдельная проверка shadow-caster bounds по light frustum
+- [x] Статистика отправленных, видимых и отброшенных примитивов
+- [x] Frustum unit tests + pixel comparisons on/off lighting
 
-## v0.3 — окружение и HDR (реализовано)
+## v0.5 — качество изображений и сцена (план)
+- [ ] Point shadow cubemaps, cascaded directional shadows
+- [ ] Alpha mask/blend, UV1, KHR glTF extensions
+- [ ] Temporal anti-aliasing и motion vectors
+- [ ] Auto exposure, более качественный multi-scale bloom
+- [ ] GPU profiling, asset caching, instanced rendering, culling hierarchy
+- [ ] Scene/ECS и игровой цикл с физическими объектами
 
-- [x] HDR Radiance панорама или процедурное HDR-небо
-- [x] Кубическая карта окружения, diffuse irradiance convolution
-- [x] GGX prefiltered specular cubemap + BRDF split-sum LUT
-- [x] HDR framebuffer (RGBA16F), skybox, exposure + ACES
-- [x] Bright-pass / 6-pass separable bloom на половине разрешения
-- [x] CLI для загрузки HDR, регулировки exposure/bloom и screenshot PPM
-- [x] Проверка содержимого итогового изображения в CI
+## v0.6+ — более крупные системы (план)
+- [ ] Скелетная анимация, физика/коллизии, звук, скрипты
+- [ ] Vulkan/D3D12 backend, render graph
+- [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
+- [ ] Editor/asset browser, LOD, streaming больших сцен
+- [ ] Golden image тесты, замеры FPS и GPU
 
-## v0.4 — качество и ресурсный pipeline (следующий этап)
-
-- [ ] Alpha mask/blend, UV1, распространённые glTF KHR extensions
-- [ ] Отрисовка многих источников света, cascaded shadow maps
-- [ ] SSAO, TAA, SSR, HDR auto exposure, более качественный bloom
-- [ ] Асинхронный asset cache, background streaming
-- [ ] Render timings, GPU profiling, frustum culling/instancing
-
-## v0.5+ — игровые подсистемы и новые API
-
-- [ ] Scene/ECS, collision/physics, animation, audio, scripting/editor
-- [ ] Vulkan/D3D12 backend + render graph, ray-traced reflections/GI
-- [ ] Регрессионные golden image tests на известных GPU
-- [ ] Ландшафт, LOD, streaming, оптимизация больших сцен
-
-Ограничения и команды для проверки текущей версии — в README.
+Список будет уточняться по результатам тестирования, профилирования и обратной связи.

@@ -35,6 +35,19 @@ uniform int uHasEmissiveTexture;
 uniform samplerCube uIrradianceMap;
 uniform samplerCube uPrefilterMap;
 uniform sampler2D uBrdfLut;
+uniform sampler2D uSSAOTex;
+uniform int uUseSSAO;
+uniform vec2 uViewport;
+
+const int MAX_POINT_LIGHTS = 8;
+struct PointLight {
+    vec3 position;
+    vec3 color;
+    float intensity;
+    float range;
+};
+uniform PointLight uPointLights[MAX_POINT_LIGHTS];
+uniform int uPointLightCount;
 
 const float PI = 3.14159265359;
 
@@ -82,6 +95,22 @@ float shadowFactor(vec3 normal) {
     return shadow / 9.0;
 }
 
+
+// Direct Cook-Torrance BRDF evaluated for the sun and for every point light.
+vec3 evaluateLight(vec3 N, vec3 V, vec3 L, vec3 radiance,
+                   vec3 albedo, vec3 f0, float metallic, float roughness) {
+    float ndotl = max(dot(N, L), 0.0);
+    if (ndotl <= 0.0) return vec3(0.0);
+    vec3 H = normalize(V + L);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
+    float D = distributionGGX(N, H, roughness);
+    float G = geometrySmith(N, V, L, roughness);
+    vec3 specular = (D * G * F) /
+                    max(4.0 * max(dot(N, V), 0.0) * ndotl, 0.0001);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
+    return (kd * albedo / PI + specular) * radiance * ndotl;
+}
+
 void main() {
     vec3 baseColor = uAlbedo;
     if (uHasBaseColorTexture != 0) {
@@ -113,20 +142,24 @@ void main() {
     }
 
     vec3 V = normalize(uViewPos - vWorldPosition);
-    vec3 L = normalize(uLightDir);
-    vec3 H = normalize(V + L);
-
     vec3 f0 = mix(vec3(0.04), baseColor, metallic);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
-    float D = distributionGGX(N, H, roughness);
-    float G = geometrySmith(N, V, L, roughness);
+    vec3 L = normalize(uLightDir);
+    vec3 direct = evaluateLight(N, V, L,
+        uLightColor * (1.0 - shadowFactor(N)), baseColor, f0, metallic, roughness);
 
-    vec3 specular = (D * G * F) /
-                    max(4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0), 0.0001);
-    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-    float ndotl = max(dot(N, L), 0.0);
-    vec3 direct = (kd * baseColor / PI + specular) *
-                  uLightColor * ndotl * (1.0 - shadowFactor(N));
+    for (int i = 0; i < MAX_POINT_LIGHTS; ++i) {
+        if (i >= uPointLightCount) break;
+        vec3 toLight = uPointLights[i].position - vWorldPosition;
+        float distanceToLight = length(toLight);
+        float range = max(uPointLights[i].range, 0.001);
+        float normalizedDistance = clamp(distanceToLight / range, 0.0, 1.0);
+        float fade = pow(max(1.0 - pow(normalizedDistance, 4.0), 0.0), 2.0);
+        float attenuation = fade / max(distanceToLight * distanceToLight, 0.25);
+        vec3 radiance = uPointLights[i].color *
+                         (uPointLights[i].intensity * attenuation);
+        direct += evaluateLight(N, V, normalize(toLight), radiance,
+                                baseColor, f0, metallic, roughness);
+    }
 
     // Physically based split-sum IBL: diffuse irradiance / PI plus GGX
     // prefiltered specular radiance integrated with the BRDF lookup table.
@@ -145,6 +178,11 @@ void main() {
     if (uHasOcclusionTexture != 0) {
         float ao = texture(uOcclusionTexture, vUV).r;
         ambient *= mix(1.0, ao, uOcclusionStrength);
+    }
+    if (uUseSSAO != 0) {
+        // SSAO is an approximation of local ambient visibility.
+        // Never darken direct light, emissions or the sky with SSAO.
+        ambient *= texture(uSSAOTex, gl_FragCoord.xy / uViewport).r;
     }
 
     vec3 emissive = uEmissive;
