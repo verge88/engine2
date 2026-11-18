@@ -8,13 +8,12 @@ layout(location = 3) in vec4 aTangent;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-uniform mat4 uLightSpace;
 
 out vec3 vWorldPosition;
 out vec3 vNormal;
 out vec4 vTangent;
 out vec2 vUV;
-out vec4 vLightPosition;
+out float vViewDepth;
 
 void main() {
     vec4 worldPosition = uModel * vec4(aPosition, 1.0);
@@ -24,6 +23,7 @@ void main() {
     vTangent = vec4(normalize(mat3(uModel) * aTangent.xyz),
                     aTangent.w * sign(determinant(mat3(uModel))));
     vUV = aUV;
-    vLightPosition = uLightSpace * worldPosition;
-    gl_Position = uProjection * uView * worldPosition;
+    vec4 viewPosition = uView * worldPosition;
+    vViewDepth = -viewPosition.z;
+    gl_Position = uProjection * viewPosition;
 }

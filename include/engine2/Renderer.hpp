@@ -5,6 +5,7 @@
 #include "engine2/Material.hpp"
 #include "engine2/PostProcess.hpp"
 #include "engine2/PointShadowMaps.hpp"
+#include "engine2/CascadedShadowMaps.hpp"
 #include "engine2/Shader.hpp"
 
 #include <glad/gl.h>
@@ -34,6 +35,9 @@ struct RendererOptions {
     bool ssao = true;
     bool frustumCulling = true;
     std::size_t pointShadowCount = 1; // first 0..2 point lights cast shadows
+    int sunCascades = 3;              // 0, 1 or 3
+    float sunShadowDistance = 95.0f; // world units, at most the camera far plane
+    bool cascadeDebug = false;
 };
 
 struct PointLight {
@@ -58,7 +62,6 @@ class Renderer {
 public:
     explicit Renderer(const std::filesystem::path& shaderDir,
                       RendererOptions options = {});
-    ~Renderer();
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
@@ -68,7 +71,14 @@ public:
 
     void setPointLights(const std::vector<PointLight>& lights);
     void setPointShadowCount(std::size_t count);
+    void setSunCascades(int count);
+    void setSunShadowDistance(float distance);
+    void setCascadeDebug(bool enabled) { options_.cascadeDebug = enabled; }
+    [[nodiscard]] bool cascadeDebug() const { return options_.cascadeDebug; }
+
     [[nodiscard]] std::size_t pointShadowCount() const { return options_.pointShadowCount; }
+    [[nodiscard]] int sunCascades() const { return options_.sunCascades; }
+    [[nodiscard]] float sunShadowDistance() const { return options_.sunShadowDistance; }
     [[nodiscard]] const FrameStats& stats() const { return stats_; }
     void setSsao(bool enabled) { options_.ssao = enabled; }
     [[nodiscard]] bool ssao() const { return options_.ssao; }
@@ -80,10 +90,8 @@ public:
     [[nodiscard]] float bloomStrength() const { return options_.bloomStrength; }
 
 private:
-    static constexpr int shadowResolution_ = 2048;
-
     Shader pbrShader_;
-    Shader shadowShader_;
+    CascadedShadowMaps sunShadows_;
     Environment environment_;
     PostProcess postProcess_;
     AmbientOcclusion ambientOcclusion_;
@@ -91,9 +99,6 @@ private:
     RendererOptions options_;
     std::vector<PointLight> pointLights_;
     FrameStats stats_{};
-
-    GLuint shadowFbo_ = 0;
-    GLuint shadowTexture_ = 0;
 
     glm::vec3 lightDirection_{-0.55f, -1.0f, -0.35f};
 };

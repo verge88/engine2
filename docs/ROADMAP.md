@@ -27,11 +27,6 @@
 
 ## v0.5 — прозрачные материалы и тесты (готово)
 - [x] Alpha MASK/BLEND glTF: cutout-тени и SSAO, сортировка blended мешей, тесты кадров
-- [ ] UV1, KHR glTF extensions
-- [ ] Temporal anti-aliasing и motion vectors
-- [ ] Auto exposure, более качественный multi-scale bloom
-- [ ] GPU profiling, asset caching, instanced rendering, culling hierarchy
-- [ ] Scene/ECS и игровой цикл с физическими объектами
 
 ## v0.6 — тени точечных источников (готово)
 - [x] Shadow cubemaps 256² × 6 для первых двух точечных источников
@@ -41,15 +36,21 @@
 - [x] CLI `--point-shadows 0..2`, `--light-time`, draw-call diagnostics
 - [x] Интеграционные screenshots on/off + pixel difference в CTest
 
-## v0.7 — изображения и сцена (план)
-- [ ] Cascaded shadow maps для направленного света
+## v0.7 — каскадные солнечные тени (готово)
+- [x] 0/1/3 солнечных каскада (depth texture array 1536², OpenGL 3.3)
+- [x] Практическая split-схема и стабильные матрицы с texel snapping
+- [x] Индивидуальное light-space culling + MASK alpha в каждом каскаде
+- [x] 3×3 PCF, настраиваемая дальность, debug tint и управление клавишей C
+- [x] Unit tests геометрии каскадов и интеграционные on/off image tests
+
+## v0.8 — качество изображений и сцена (план)
 - [ ] Temporal AA и motion vectors
 - [ ] Автоматическая HDR-экспозиция, более качественный bloom
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions
 - [ ] Scene/ECS, редактор сцен и физические объекты
 
-## v0.6+ — более крупные системы (план)
+## v0.9+ — более крупные системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

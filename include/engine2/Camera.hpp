@@ -9,6 +9,9 @@ namespace engine2 {
 
 class Camera {
 public:
+    static constexpr float nearPlane = 0.1f;
+    static constexpr float farPlane = 150.0f;
+
     Camera();
 
     void update(GLFWwindow* window, float deltaTime);

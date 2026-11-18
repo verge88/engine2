@@ -65,7 +65,7 @@ glm::mat4 Camera::viewMatrix() const {
 }
 
 glm::mat4 Camera::projectionMatrix(float aspect) const {
-    return glm::perspective(glm::radians(fov_), aspect, 0.1f, 150.0f);
+    return glm::perspective(glm::radians(fov_), aspect, nearPlane, farPlane);
 }
 
 } // namespace engine2
