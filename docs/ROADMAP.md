@@ -43,14 +43,24 @@
 - [x] 3×3 PCF, настраиваемая дальность, debug tint и управление клавишей C
 - [x] Unit tests геометрии каскадов и интеграционные on/off image tests
 
-## v0.8 — качество изображений и сцена (план)
-- [ ] Temporal AA и motion vectors
-- [ ] Автоматическая HDR-экспозиция, более качественный bloom
+## v0.8 — временное сглаживание (готово)
+- [x] 8-сэмпловый Halton jitter на матрице камеры
+- [x] Full-res HDR history ping-pong и сохранение линейной глубины в alpha
+- [x] Reprojection через depth + предыдущую view-projection матрицу камеры
+- [x] Проверка disocclusion и 3×3 neighborhood color clipping / adaptive history weight
+- [x] Сброс истории при resize, переключении и телепорте камеры
+- [x] Стабильное CSM: каскады используют недрожащую проекцию
+- [x] CLI --taa / --taa-weight, клавиша T, статистика накопления
+- [x] Unit-тест Halton jitter и headless визуальные/диагностические проверки
+
+## v0.9 — детализация и производительность (план)
+- [ ] Motion vectors объектов и корректный TAA для движущихся мешей
+- [ ] Автоматическая HDR-экспозиция, multi-scale bloom
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions
 - [ ] Scene/ECS, редактор сцен и физические объекты
 
-## v0.9+ — более крупные системы (план)
+## v1.0+ — игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

@@ -3,6 +3,7 @@
 #include "engine2/Camera.hpp"
 #include "engine2/Frustum.hpp"
 #include "engine2/Mesh.hpp"
+#include "engine2/TemporalAA.hpp"
 
 #include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -43,6 +44,7 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
     setPointShadowCount(options_.pointShadowCount);
     setSunCascades(options_.sunCascades);
     setSunShadowDistance(options_.sunShadowDistance);
+    setTaaHistoryWeight(options_.taaHistoryWeight);
     lightDirection_ = glm::normalize(lightDirection_);
 
     glEnable(GL_DEPTH_TEST);
@@ -50,6 +52,19 @@ Renderer::Renderer(const std::filesystem::path& shaderDir, RendererOptions optio
     glCullFace(GL_BACK);
     glEnable(GL_MULTISAMPLE);
 
+}
+
+void Renderer::setTaa(bool enabled) {
+    if (options_.taa == enabled) return;
+    options_.taa = enabled;
+    temporalFrame_ = 0;
+    postProcess_.resetTemporalHistory();
+}
+
+void Renderer::setTaaHistoryWeight(float weight) {
+    if (!std::isfinite(weight))
+        throw std::invalid_argument("TAA history weight must be finite");
+    options_.taaHistoryWeight = glm::clamp(weight, 0.0f, 0.98f);
 }
 
 void Renderer::setExposure(float exposure) {
@@ -88,14 +103,22 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     if (framebufferWidth <= 0 || framebufferHeight <= 0) return;
 
     const glm::mat4 view = camera.viewMatrix();
-    const glm::mat4 projection = camera.projectionMatrix(
+    const glm::mat4 stableProjection = camera.projectionMatrix(
         static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
+    // Apply jitter to the camera rendering only, *not* to cascade fitting or
+    // visibility culling. This keeps sun shadow matrices stable across frames.
+    glm::mat4 projection = stableProjection;
+    if (options_.taa) {
+        projection = jitterProjection(
+            stableProjection, temporalJitter(temporalFrame_++),
+            framebufferWidth, framebufferHeight);
+    }
 
     stats_ = {};
     stats_.submittedItems = items.size();
     std::vector<RenderItem> visible;
     visible.reserve(items.size());
-    const Frustum frustum(projection * view);
+    const Frustum frustum(stableProjection * view);
     for (const auto& item : items) {
         if (!item.mesh) continue;
         if (options_.frustumCulling && !frustum.intersects(item.mesh->bounds(), item.model)) {
@@ -110,7 +133,7 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
     // distance. Each layer is independently depth-rendered and culls against
     // its own light-space frustum (including off-camera shadow casters).
     stats_.shadowDrawCalls = sunShadows_.render(
-        view, projection, lightDirection_, items,
+        view, stableProjection, lightDirection_, items,
         Camera::nearPlane, Camera::farPlane, options_.sunShadowDistance,
         options_.sunCascades);
 
@@ -263,7 +286,15 @@ void Renderer::render(const Camera& camera, const std::vector<RenderItem>& items
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     }
 
-    // Pass 3: half-resolution bloom and filmic tonemapping into the display.
+    // Pass 3: full-resolution HDR temporal resolve (reproject depth from the
+    // current camera and clamp history to the current 3x3 color neighborhood).
+    // All postprocessing reads the resolved HDR texture, not the raw scene.
+    postProcess_.resolveTemporal(
+        projection * view, camera.position(), Camera::nearPlane,
+        Camera::farPlane, options_.taa, options_.taaHistoryWeight);
+    stats_.taaHistoryFrames = postProcess_.temporalFrames();
+
+    // Pass 4: half-resolution bloom and filmic tonemapping into the display.
     postProcess_.present(options_.exposure, options_.bloomStrength);
 }
 

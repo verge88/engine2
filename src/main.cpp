@@ -127,6 +127,14 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.pointShadowCount = static_cast<std::size_t>(value);
         } else if (arg == "--light-time" && i + 1 < argc) {
             args.fixedLightTime = parseSetting(argv[++i], "--light-time", 0.0f, 1000000.0f);
+        } else if (arg == "--taa" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--taa", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--taa requires 0 or 1");
+            args.renderer.taa = value != 0.0f;
+        } else if (arg == "--taa-weight" && i + 1 < argc) {
+            args.renderer.taaHistoryWeight =
+                parseSetting(argv[++i], "--taa-weight", 0.0f, 0.98f);
         } else if (arg == "--ssao" && i + 1 < argc) {
             const float value = parseSetting(argv[++i], "--ssao", 0.0f, 1.0f);
             if (value != std::floor(value))
@@ -286,6 +294,7 @@ int run(int argc, char** argv) {
     bool previousBloom = false;
     bool previousOcclusion = false;
     bool previousCascadeDebug = false;
+    bool previousTemporal = false;
     bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
@@ -320,6 +329,9 @@ int run(int argc, char** argv) {
         if (toggleCascade && !previousCascadeDebug)
             renderer.setCascadeDebug(!renderer.cascadeDebug());
         previousCascadeDebug = toggleCascade;
+        const bool toggleTaa = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
+        if (toggleTaa && !previousTemporal) renderer.setTaa(!renderer.taa());
+        previousTemporal = toggleTaa;
 
         const double now = glfwGetTime();
         camera.update(window, static_cast<float>(now - lastTime));
@@ -352,7 +364,9 @@ int run(int argc, char** argv) {
                   << " pointShadowDraws=" << stats.pointShadowDrawCalls
                   << " geometryDraws=" << stats.geometryDrawCalls
                   << " maskedDraws=" << stats.alphaMaskedDrawCalls
-                  << " blendedDraws=" << stats.alphaBlendedDrawCalls << '\n';
+                  << " blendedDraws=" << stats.alphaBlendedDrawCalls
+                  << " taa=" << (renderer.taa() ? 1 : 0)
+                  << " taaHistoryFrames=" << stats.taaHistoryFrames << '\n';
     }
     return 0;
 }

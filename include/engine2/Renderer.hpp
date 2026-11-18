@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <optional>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace engine2 {
@@ -38,6 +39,8 @@ struct RendererOptions {
     int sunCascades = 3;              // 0, 1 or 3
     float sunShadowDistance = 95.0f; // world units, at most the camera far plane
     bool cascadeDebug = false;
+    bool taa = true;
+    float taaHistoryWeight = 0.88f;
 };
 
 struct PointLight {
@@ -56,6 +59,7 @@ struct FrameStats {
     std::size_t geometryDrawCalls = 0;
     std::size_t alphaMaskedDrawCalls = 0;
     std::size_t alphaBlendedDrawCalls = 0;
+    std::size_t taaHistoryFrames = 0;
 };
 
 class Renderer {
@@ -84,6 +88,11 @@ public:
     [[nodiscard]] bool ssao() const { return options_.ssao; }
     void setFrustumCulling(bool enabled) { options_.frustumCulling = enabled; }
 
+    void setTaa(bool enabled);
+    [[nodiscard]] bool taa() const { return options_.taa; }
+    void setTaaHistoryWeight(float weight);
+    [[nodiscard]] float taaHistoryWeight() const { return options_.taaHistoryWeight; }
+
     void setExposure(float exposure);
     [[nodiscard]] float exposure() const { return options_.exposure; }
     void setBloomStrength(float strength);
@@ -99,6 +108,7 @@ private:
     RendererOptions options_;
     std::vector<PointLight> pointLights_;
     FrameStats stats_{};
+    std::uint64_t temporalFrame_ = 0;
 
     glm::vec3 lightDirection_{-0.55f, -1.0f, -0.35f};
 };
