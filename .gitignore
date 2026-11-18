@@ -1,0 +1,26 @@
+# CMake and IDE
+/build/
+/out/
+/cmake-build-*/
+/.vs/
+/.vscode/
+/.idea/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+
+# Operating systems
+.DS_Store
+Thumbs.db
