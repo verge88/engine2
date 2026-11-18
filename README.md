@@ -1,23 +1,25 @@
 # engine2
 
-**engine2 v0.3** — собственное ядро 3D-движка на **C++20 / OpenGL 3.3 Core** с текстурными PBR-материалами, **HDR Image-Based Lighting** и постобработкой. Это фундамент для графического движка, не полноценный фотореалистичный Unreal Engine.
+**engine2 v0.4** — экспериментальный 3D-рендерер на **C++20 / OpenGL 3.3 Core**. Есть glTF 2.0, текстурные PBR-материалы, HDR Image-Based Lighting, несколько точечных источников света, SSAO и отсечение невидимых объектов. Это пока **не полноценный игровой движок и не готовый фотореализм**.
 
-## Реализовано
+## Возможности
 
-- GLFW окно, собственный цикл приложения, FPS-камера и управление.
-- VAO/VBO/EBO, процедурная геометрия, трансформации.
-- **glTF 2.0 (.gltf и .glb)**: треугольники, меши, UV0, иерархия узлов, нормали, тангенты, генерация отсутствующих нормалей/тангентов.
-- **PBR-текстуры** glTF: base color (sRGB), metallic/roughness (линейные B/G), normal map, occlusion, emissive.
-- **Cook–Torrance / GGX** и 2048×2048 directional shadow map с PCF.
-- **HDR environment IBL:** загрузка панорам Radiance `.hdr` или процедурный HDR-небосвод; precomputed diffuse irradiance cubemap, GGX prefiltered specular cubemap (5 mips), split-sum BRDF LUT. HDR skybox.
-- **HDR-кадр** GL_RGBA16F, bright-pass / separable Gaussian bloom на половине разрешения, настраиваемая экспозиция, ACES filmic tonemapping.
-- Захват кадра в PPM, автоматизированные smoke tests и проверка, что кадр непустой.
+- GLFW окно, цикл приложения, FPS-камера, управление мышью и клавиатурой.
+- Индексированные меши, процедурная геометрия, трансформации, локальные AABB.
+- Импорт **glTF 2.0 (.gltf/.glb)**: меши, UV0, иерархия узлов, инстансы, генерация нормалей и тангентов.
+- Текстурные PBR-материалы: base color (sRGB), metallic/roughness, normal, AO, emissive.
+- **Cook–Torrance GGX**: направленный свет с PCF shadow map 2048×2048, **до 8 движущихся точечных источников света** с затуханием по квадрату расстояния и плавным ограничением радиуса.
+- **HDR IBL**: панорама Radiance `.hdr` или процедурный небосвод, diffuse irradiance, GGX specular prefilter, split-sum BRDF LUT.
+- **SSAO**: полурезолюционный геометрический проход (позиция/нормаль в координатах камеры), 16 hemisphere samples и edge-aware blur; влияет на непрямое освещение, а не на прямой свет.
+- **Frustum culling**: шесть плоскостей камеры проверяются против трансформированных AABB; shadow casters проверяются отдельно во фрустуме солнца, чтобы не терять тени от объектов вне кадра.
+- HDR framebuffer RGBA16F, bloom, ACES tonemapping, экспозиция.
+- PPM-screenshot, диагностические счётчики draw calls, CTest с базовыми проверками пикселей и математики.
 
-Библиотеки: GLFW (окно), glad (OpenGL), GLM (математика), tinygltf + stb (импорт glTF и HDR). Рендерер, подготовка карт IBL, GLSL и GPU-ресурсы реализованы непосредственно в engine2.
+Внешние зависимости: GLFW, glad, GLM, tinygltf/stb. Код GPU-проходов, фильтров, PBR-шейдеров, отбраковки и приложения находится в `engine2`.
 
 ## Сборка
 
-Требования: CMake 3.24+, C++20 компилятор, Python 3, Git, OpenGL 3.3 Core драйвер, интернет при первом запуске CMake. На Ubuntu установите `libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev xvfb`.
+Требуются: CMake 3.24+, C++20, Python 3, Git, OpenGL 3.3 Core, интернет для первой настройки CMake. На Ubuntu потребуются `libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev xvfb`.
 
 ```bash
 git clone https://github.com/verge88/engine2.git
@@ -27,53 +29,57 @@ cmake --build build --parallel
 ./build/engine2
 ```
 
-Windows (Visual Studio): `cmake -S . -B build`, `cmake --build build --config Release` и `build/Release/engine2.exe`. macOS: OpenGL 3.3 forward-compatible context. GLSL-файлы копируются в каталог `shaders` рядом с бинарником.
+На Windows: `cmake -S . -B build`, `cmake --build build --config Release`, запуск `build/Release/engine2.exe`; на macOS требуется OpenGL 3.3 Core. Каталог `shaders` копируется рядом с бинарником.
 
-## Примеры
+## Параметры
 
 ```bash
-# Демонстрационная сетка из 25 PBR-материалов + процедурное HDR-небо
+# Включённый по умолчанию SSAO и 3 движущихся локальных источника
 ./build/engine2
 
-# Собственная модель и HDR-окружение (equirectangular Radiance RGBE .hdr)
-./build/engine2 --model /path/to/model.glb --environment /path/to/studio.hdr
+# Внешние модель и окружение, 6 цветных огней
+./build/engine2 --model assets/scene.glb --environment assets/studio.hdr --lights 6
 
-# Экспозиция и интенсивность bloom
-./build/engine2 --exposure 0.7 --bloom 0.3
+# Отключить затенение окружения или все точечные источники
+./build/engine2 --ssao 0 --lights 0
 
-# Рендер 2 кадров и снимок последнего в PPM (P6), для диагностики
-./build/engine2 --frames 2 --screenshot frame.ppm
+# Отключить frustum culling для отладки геометрии
+./build/engine2 --culling 0
 
-# Smoke-тесты, включая встроенную тестовую модель/HDR и содержимое кадра
+# Экспозиция, bloom, статистика и сохранение PPM
+./build/engine2 --exposure 0.75 --bloom 0.25 --frames 2 --stats --screenshot frame.ppm
+
+# Автоматические тесты
 ctest --test-dir build --output-on-failure
 ```
 
-### Управление
+Допустимые диапазоны: `--lights` 0..8 (целое), `--ssao` и `--culling` 0|1, `--exposure` 0.05..16, `--bloom` 0..2.
 
 | Клавиша | Действие |
 | --- | --- |
 | W/A/S/D, мышь | Перемещение и осмотр |
-| Space / Left Ctrl | Вверх / вниз |
-| Shift | Ускорение |
-| Tab | Захват / освобождение мыши |
-| Колесо | Угол обзора |
-| [ / ] | Уменьшить / увеличить экспозицию |
-| B | Включить / отключить bloom |
-| Esc | Выход |
+| Space / Left Ctrl, Shift | Высота, ускорение |
+| Колесо, Tab, Esc | FOV, освободить/захватить курсор, выход |
+| [ / ] | Экспозиция −/+ |
+| B | Вкл/выкл bloom |
+| O | Вкл/выкл SSAO |
 
-## Ограничения
+## Ограничения версии 0.4
 
-Фотореализм не гарантируется: **нет глобального освещения (GI), ray tracing, динамической экспозиции, TAA, SSR, SSAO, физики или редактора**. IBL — приближение split-sum для статического HDR-окружения, не real-time отражения объектов. В glTF пока работают непрозрачные TRIANGLES и UV0 без анимаций, скининга, sparse accessors, alpha blend/mask, KHR расширений. Тени от одного направленного источника, ограниченная область shadow map; bloom — простой Gaussian, не многомасштабный.
+- **Точечные источники пока не отбрасывают тени**: directional shadow map есть только для солнца. Точечные источники освещают поверхности по GGX без shadow cubemap.
+- SSAO не учитывает normal maps и является экранным приближением, не глобальным освещением; возможно появление артефактов на границах.
+- Расчёт IBL основан на статическом HDR-окружении. Нет трассировки лучей, TAA, SSR, настоящего GI, cascaded shadows, авторегулирования экспозиции.
+- Импорт glTF ограничен непрозрачными TRIANGLES и UV0 без анимаций, скининга, alpha modes, sparse accessors и extensions.
+- Frustum culling CPU не использует иерархические деревья/батчинг: одна проверка на экземпляр. Статистика считает только переданные в API `RenderItem` и draw calls из shadow/PBR-проходов.
+- Производительность различается по драйверам. Тесты запускаются в Linux через программный OpenGL, визуальное сравнение пока не эталонное.
 
-HDR-файлы должны быть Radiance equirectangular `.hdr` (не OpenEXR); внешние файлы могут требовать настройки камеры и экспозиции. При каждом запуске окружение предобрабатывается на GPU; кеш в файлы не реализован.
-
-См. [дорожную карту](docs/ROADMAP.md).
+Следующие шаги: [дорожная карта](docs/ROADMAP.md).
 
 ```text
-include/engine2/   Camera, Mesh, Material, GltfLoader, Environment, PostProcess, Renderer
-src/               C++20 GPU implementation and demo application
-shaders/           GLSL 330 for GGX / IBL / skybox / shadows / bloom / composite
-tests/             Embedded glTF + Radiance .hdr and frame-content validation
-docs/ROADMAP.md    Development milestones
-.github/workflows/ CI build and ctest
+include/engine2/    API камеры, мешей, AABB/Frustum, материалов и рендер-проходов
+src/                C++20: импорт, PBR, SSAO, IBL, постобработка
+shaders/            GLSL 330: GGX, HDR, SSAO, skybox, shadows, bloom
+tests/              glTF/HDR fixtures, frustum unit tests, проверки изображений
+docs/ROADMAP.md     План развития
+.github/workflows/  CI build + ctest
 ```

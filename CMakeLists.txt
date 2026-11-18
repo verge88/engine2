@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 0.3.0 LANGUAGES C CXX)
+project(engine2 VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,7 @@ add_library(engine2_core STATIC
     src/GltfLoader.cpp
     src/Environment.cpp
     src/PostProcess.cpp
+    src/AmbientOcclusion.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -84,6 +85,13 @@ add_custom_command(TARGET engine2 POST_BUILD
 )
 
 include(CTest)
+if(BUILD_TESTING)
+    add_executable(engine2_frustum_tests tests/frustum_test.cpp)
+    target_include_directories(engine2_frustum_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_frustum_tests PRIVATE glm::glm)
+    add_test(NAME frustum-unit COMMAND engine2_frustum_tests)
+endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -102,8 +110,20 @@ if(BUILD_TESTING AND UNIX)
             COMMAND ${Python3_EXECUTABLE}
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_ppm.py"
                     "${CMAKE_CURRENT_BINARY_DIR}/engine2-smoke.ppm")
+        add_test(NAME no-ssao-no-lights-smoke
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --frames 2
+                    --ssao 0 --lights 0 --stats
+                    --screenshot "${CMAKE_CURRENT_BINARY_DIR}/no-lights.ppm")
+        add_test(NAME lighting-image-difference
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_ppm.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/engine2-smoke.ppm"
+                    "${CMAKE_CURRENT_BINARY_DIR}/no-lights.ppm")
+        set_tests_properties(lighting-image-difference PROPERTIES
+            DEPENDS "image-capture;no-ssao-no-lights-smoke")
         set_tests_properties(validate-image PROPERTIES DEPENDS image-capture)
-        set_tests_properties(procedural-smoke gltf-hdr-smoke image-capture PROPERTIES
+        set_tests_properties(procedural-smoke gltf-hdr-smoke image-capture
+                             no-ssao-no-lights-smoke PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
     endif()
 endif()
