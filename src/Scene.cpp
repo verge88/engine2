@@ -3,6 +3,7 @@
 #include "engine2/PhysicsBroadphase.hpp"
 #include "engine2/ContinuousCollision.hpp"
 #include "engine2/AngularDynamics.hpp"
+#include "engine2/RigidBodyMath.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -29,13 +30,22 @@ bool finite(const glm::mat4& matrix) {
     return true;
 }
 
-float inverseAngularInertia(const RigidBodyComponent& body) {
+float inverseCcdAngularInertia(const RigidBodyComponent& body) {
     if (body.isStatic || body.shape!=ColliderShape::Sphere) return 0.0f;
-    // Solid sphere around any axis: I = 2/5 m r^2.
     return 2.5f/(body.mass*body.radius*body.radius);
 }
 
-glm::vec3 contactLeverArm(
+glm::mat3 inverseAngularInertia(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    if (body.isStatic) return glm::mat3(0.0f);
+    // Continuous boxes preserve the existing translation-only CCD contract.
+    if (body.shape==ColliderShape::Box && body.continuous)
+        return glm::mat3(0.0f);
+    return worldInverseInertia(
+        body.shape,body.mass,body.radius,body.halfExtents,rotation);
+}
+
+glm::vec3 ccdContactLeverArm(
     const RigidBodyComponent& body, glm::vec3 position,
     const RigidBodyComponent& other, glm::vec3 otherPosition,
     glm::vec3 normal, bool firstBody) {
@@ -43,6 +53,36 @@ glm::vec3 contactLeverArm(
         {body.shape,body.radius,body.halfExtents},position,
         {other.shape,other.radius,other.halfExtents},otherPosition,
         normal,firstBody);
+}
+
+glm::vec3 boxFloorLeverArm(
+    glm::vec3 position,const RigidBodyComponent& body,
+    const glm::mat3& rotation) {
+    if (body.shape==ColliderShape::Sphere)
+        return glm::vec3(0.0f,-body.radius,0.0f);
+    const OrientedBox box{position,rotation,body.halfExtents};
+    return orientedBoxFeatureSupport(box,glm::vec3(0,-1,0))-position;
+}
+
+float floorHalfHeight(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    if (body.shape==ColliderShape::Sphere) return body.radius;
+    return orientedBoxProjectedRadius(
+        {glm::vec3(0.0f),rotation,body.halfExtents},
+        glm::vec3(0,1,0));
+}
+
+bool ccdGeometrySupported(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    return body.shape==ColliderShape::Sphere || axisAlignedRotation(rotation);
+}
+
+ColliderGeometry ccdGeometry(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    ColliderGeometry result{body.shape,body.radius,body.halfExtents};
+    if (body.shape==ColliderShape::Box)
+        result.halfExtents=orientedBoxAabbHalf(body.halfExtents,rotation);
+    return result;
 }
 
 } // namespace
@@ -163,8 +203,14 @@ void Scene::setParent(Entity child, Entity newParent, bool keepWorld) {
 void Scene::setLocalTransform(Entity entity, const glm::mat4& matrix) {
     if (!finite(matrix))
         throw std::invalid_argument("Scene transform contains non-finite values");
+    Slot& slot=checked(entity);
+    if (slot.body && !slot.body->isStatic &&
+        slot.body->shape==ColliderShape::Box && slot.body->continuous &&
+        !axisAlignedRotation(rigidBodyRotation(matrix)))
+        throw std::invalid_argument(
+            "Continuous Box CCD requires an axis-aligned box transform");
     invalidateContacts(entity.index);
-    checked(entity).local = matrix;
+    slot.local = matrix;
 }
 
 const glm::mat4& Scene::localTransform(Entity entity) const {
@@ -257,12 +303,17 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
         body.dynamicFriction > body.staticFriction)
         throw std::invalid_argument("Invalid rigid body parameters");
     const bool spinning=glm::dot(body.angularVelocity,body.angularVelocity)>1.0e-12f;
-    if (spinning && body.shape!=ColliderShape::Sphere)
-        throw std::invalid_argument(
-            "Angular velocity currently requires a spherical collider");
     if (spinning && body.isStatic)
         throw std::invalid_argument(
             "Static rigid bodies cannot have angular velocity");
+    if (body.shape==ColliderShape::Box && body.continuous) {
+        if (spinning)
+            throw std::invalid_argument(
+                "Continuous Box CCD is translation-only; disable CCD before spinning");
+        if (!body.isStatic && !axisAlignedRotation(rigidBodyRotation(slot.local)))
+            throw std::invalid_argument(
+                "Continuous Box CCD requires an axis-aligned box transform");
+    }
     invalidateContacts(entity.index);
     slot.body = body;
 }
