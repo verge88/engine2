@@ -66,6 +66,9 @@ struct SceneStats {
     std::uint64_t ccdHits = 0;         // all swept sphere time-of-impact events
     std::uint64_t ccdDynamicHits = 0;  // TOIs between two moving CCD spheres
     std::uint64_t ccdBudgetExhaustions = 0; // remaining time after event limit
+    std::uint64_t ccdBoxFaceHits = 0;   // exact sphere/box face impacts
+    std::uint64_t ccdBoxEdgeHits = 0;   // exact sphere/box cylindrical-edge impacts
+    std::uint64_t ccdBoxCornerHits = 0; // exact sphere/box spherical-corner impacts
     std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
     std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
     std::uint64_t solverPasses = 0;    // accumulated sequential solver passes
@@ -144,6 +147,9 @@ private:
     std::uint64_t ccdHits_ = 0;
     std::uint64_t ccdDynamicHits_ = 0;
     std::uint64_t ccdBudgetExhaustions_ = 0;
+    std::uint64_t ccdBoxFaceHits_ = 0;
+    std::uint64_t ccdBoxEdgeHits_ = 0;
+    std::uint64_t ccdBoxCornerHits_ = 0;
     std::uint64_t sphereContacts_ = 0;
     std::uint64_t boxContacts_ = 0;
     std::uint64_t solverPasses_ = 0;
