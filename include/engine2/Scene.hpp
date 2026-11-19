@@ -6,9 +6,11 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -71,6 +73,8 @@ struct SceneStats {
     std::uint64_t ccdBoxCornerHits = 0; // exact sphere/box spherical-corner impacts
     std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
     std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
+    std::size_t persistentContacts = 0;// current cross-step resting contact cache
+    std::uint64_t contactWarmStarts = 0;// accumulated cache reuses across fixed steps
     std::uint64_t solverPasses = 0;    // accumulated sequential solver passes
 };
 
@@ -120,6 +124,15 @@ public:
     [[nodiscard]] std::uint32_t advance(float deltaSeconds);
 
 private:
+    using ContactCacheKey = std::array<std::uint32_t,4>;
+
+    struct PersistentContactState {
+        float normalImpulse = 0.0f;
+        glm::vec3 tangentImpulse{0.0f};
+        glm::vec3 normal{1.0f,0.0f,0.0f};
+        std::uint64_t lastSeenStep = 0;
+    };
+
     struct Slot {
         std::uint32_t generation = 1;
         bool alive = false;
@@ -135,10 +148,12 @@ private:
     [[nodiscard]] const Slot& checked(Entity entity) const;
     [[nodiscard]] Slot& checked(Entity entity);
     [[nodiscard]] bool isVisible(Entity entity) const;
+    void invalidateContacts(std::uint32_t slot);
     void fixedStep();
 
     std::vector<Slot> slots_;
     std::vector<std::uint32_t> freeSlots_;
+    std::map<ContactCacheKey,PersistentContactState> contactCache_;
     double accumulator_ = 0.0;
     std::uint64_t totalSteps_ = 0;
     std::uint64_t broadphasePairs_ = 0;
@@ -152,6 +167,7 @@ private:
     std::uint64_t ccdBoxCornerHits_ = 0;
     std::uint64_t sphereContacts_ = 0;
     std::uint64_t boxContacts_ = 0;
+    std::uint64_t contactWarmStarts_ = 0;
     std::uint64_t solverPasses_ = 0;
 };
 

@@ -206,7 +206,8 @@
 
 ## v2.5 — развитие физики и инструментов сцены (в работе)
 - [x] Translation-only CCD динамических AABB против sphere/AABB, включая moving/moving и несколько ударов за fixed step
-- [ ] Persistent contact manifolds и устойчивые длительные контакты на больших скоростях
+- [x] Persistent pair-contact cache и warm starting накопленных normal/tangent impulses между fixed steps
+- [ ] Multi-point contact manifolds и устойчивые длительные контакты для сложных/вращающихся тел
 - [ ] Angular dynamics, joints и вращающиеся OBB
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema

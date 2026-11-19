@@ -69,6 +69,15 @@ Scene::Slot& Scene::checked(Entity entity) {
     return const_cast<Slot&>(std::as_const(*this).checked(entity));
 }
 
+void Scene::invalidateContacts(std::uint32_t slot) {
+    for (auto it=contactCache_.begin();it!=contactCache_.end();) {
+        if (it->first[0]==slot || it->first[2]==slot)
+            it=contactCache_.erase(it);
+        else
+            ++it;
+    }
+}
+
 const std::string& Scene::name(Entity entity) const {
     return checked(entity).name;
 }
@@ -96,6 +105,7 @@ void Scene::destroyEntity(Entity entity) {
     for (Entity child : children) destroyEntity(child);
 
     Slot& slot = checked(entity);
+    invalidateContacts(entity.index);
     slot.alive = false;
     slot.name.clear();
     slot.parent = {};
@@ -136,6 +146,7 @@ void Scene::setParent(Entity child, Entity newParent, bool keepWorld) {
 void Scene::setLocalTransform(Entity entity, const glm::mat4& matrix) {
     if (!finite(matrix))
         throw std::invalid_argument("Scene transform contains non-finite values");
+    invalidateContacts(entity.index);
     checked(entity).local = matrix;
 }
 
@@ -157,6 +168,7 @@ glm::mat4 Scene::worldTransform(Entity entity) const {
 }
 
 void Scene::setEnabled(Entity entity, bool enabled) {
+    invalidateContacts(entity.index);
     checked(entity).enabled = enabled;
 }
 
@@ -226,6 +238,7 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
         body.dynamicFriction < 0.0f ||
         body.dynamicFriction > body.staticFriction)
         throw std::invalid_argument("Invalid rigid body parameters");
+    invalidateContacts(entity.index);
     slot.body = body;
 }
 
@@ -278,6 +291,8 @@ SceneStats Scene::stats() const {
     result.ccdBoxCornerHits = ccdBoxCornerHits_;
     result.sphereContacts = sphereContacts_;
     result.boxContacts = boxContacts_;
+    result.persistentContacts = contactCache_.size();
+    result.contactWarmStarts = contactWarmStarts_;
     result.solverPasses = solverPasses_;
     for (const Slot& slot : slots_) {
         if (!slot.alive) continue;
@@ -483,20 +498,44 @@ void Scene::fixedStep() {
     struct Constraint {
         std::size_t first=0;
         std::size_t second=0;
+        ContactCacheKey key{};
         ContactImpulseState impulse;
+        PersistentContactState cached;
+        glm::vec3 normal{1.0f,0.0f,0.0f};
+        bool hasCached=false;
         bool counted=false;
     };
     std::vector<Constraint> constraints;
     constraints.reserve(broadphase.pairs.size());
-    for (const auto& [first,second] : broadphase.pairs)
-        constraints.push_back({first,second,{},false});
+    for (const auto& [first,second] : broadphase.pairs) {
+        const Candidate& a=candidates[first];
+        const Candidate& b=candidates[second];
+        const ContactCacheKey key{
+            a.slot,slots_[a.slot].generation,
+            b.slot,slots_[b.slot].generation
+        };
+        Constraint constraint;
+        constraint.first=first;
+        constraint.second=second;
+        constraint.key=key;
+        const auto cached=contactCache_.find(key);
+        if (cached!=contactCache_.end() &&
+            cached->second.lastSeenStep+1==totalSteps_) {
+            constraint.cached=cached->second;
+            constraint.hasCached=true;
+        }
+        constraints.push_back(constraint);
+    }
 
     // Sequential impulses communicate forces through chains of contacts.
-    // Normal and tangent impulses are cached for all eight passes, so bounce
-    // and Coulomb friction are not spuriously re-applied on each pass.
+    // Resting constraints can reuse the previous fixed step's accumulated
+    // normal/tangent impulses before the eight Gauss-Seidel passes. A cached
+    // contact is rejected if its normal changed or a fresh high-speed impact
+    // needs restitution instead of resting-contact warm starting.
     constexpr int iterations=8;
     constexpr float positionSlop=0.0001f;
     constexpr float positionFactor=0.8f;
+    constexpr float warmNormalAlignment=0.98f;
     for (int pass=0;pass<iterations;++pass) {
         for (Constraint& c : constraints) {
             Candidate& first=candidates[c.first];
@@ -507,6 +546,7 @@ void Scene::fixedStep() {
                 {a.shape,a.radius,a.halfExtents},first.position,
                 {b.shape,b.radius,b.halfExtents},second.position);
             if (!contact.colliding) continue;
+            c.normal=contact.normal;
             if (!c.counted) {
                 if (a.shape==ColliderShape::Sphere &&
                     b.shape==ColliderShape::Sphere) ++sphereContacts_;
@@ -519,6 +559,22 @@ void Scene::fixedStep() {
             if (total<=0.0f) continue;
             glm::vec3 velocityA=a.isStatic ? glm::vec3(0.0f) : a.velocity;
             glm::vec3 velocityB=b.isStatic ? glm::vec3(0.0f) : b.velocity;
+
+            if (pass==0 && c.hasCached &&
+                glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment) {
+                const float closing=glm::dot(velocityB-velocityA,contact.normal);
+                if (closing>=-0.5f) {
+                    c.impulse.accumulatedNormal=c.cached.normalImpulse;
+                    c.impulse.accumulatedTangent=c.cached.tangentImpulse;
+                    c.impulse.reboundTarget=0.0f;
+                    c.impulse.initialized=true;
+                    c.impulse.persistentEligible=true;
+                    warmStartContactImpulse(
+                        velocityA,velocityB,invA,invB,contact.normal,c.impulse);
+                    ++contactWarmStarts_;
+                }
+            }
+
             solveContactImpulse(
                 velocityA,velocityB,invA,invB,contact.normal,
                 {a.restitution,a.staticFriction,a.dynamicFriction},
@@ -544,6 +600,31 @@ void Scene::fixedStep() {
             }
         }
     }
+
+    // Persist only resting contacts. Impacts with a restitution target are
+    // deliberately not cached, preventing a large bounce impulse from being
+    // replayed on the next fixed step. Entries not seen this step are pruned.
+    for (const Constraint& c : constraints) {
+        if (c.counted && c.impulse.initialized &&
+            c.impulse.persistentEligible &&
+            c.impulse.accumulatedNormal>0.0f) {
+            contactCache_[c.key]={
+                c.impulse.accumulatedNormal,
+                c.impulse.accumulatedTangent,
+                c.normal,
+                totalSteps_
+            };
+        } else {
+            contactCache_.erase(c.key);
+        }
+    }
+    for (auto it=contactCache_.begin();it!=contactCache_.end();) {
+        if (it->second.lastSeenStep!=totalSteps_)
+            it=contactCache_.erase(it);
+        else
+            ++it;
+    }
+
     for (const Candidate& candidate : candidates) {
         Slot& slot=slots_[candidate.slot];
         if (!slot.body->isStatic)

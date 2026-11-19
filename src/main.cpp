@@ -814,6 +814,8 @@ int run(int argc, char** argv) {
                   << " sceneCcdBoxCornerHits=" << sceneStats.ccdBoxCornerHits
                   << " sceneSphereContacts=" << sceneStats.sphereContacts
                   << " sceneBoxContacts=" << sceneStats.boxContacts
+                  << " scenePersistentContacts=" << sceneStats.persistentContacts
+                  << " sceneContactWarmStarts=" << sceneStats.contactWarmStarts
                   << " sceneSolverPasses=" << sceneStats.solverPasses;
         if (fallingSphere && world.contains(*fallingSphere)) {
             std::cout << " physicsY=" << world.worldTransform(*fallingSphere)[3][1];
