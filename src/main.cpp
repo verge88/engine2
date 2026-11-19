@@ -75,6 +75,9 @@ struct Arguments {
     std::optional<bool> guiVisible;
     std::optional<std::size_t> guiSelection;
     std::optional<bool> gizmoEnabled;
+    std::optional<engine2::GizmoMode> gizmoMode;
+    std::optional<bool> gizmoSnap;
+    std::optional<float> gizmoGridStep;
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
@@ -203,6 +206,23 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--gizmo requires 0 or 1");
             args.gizmoEnabled=value!=0.0f;
+        } else if (arg == "--gizmo-mode" && i + 1 < argc) {
+            const std::string mode(argv[++i]);
+            if (mode == "move" || mode == "translate")
+                args.gizmoMode = engine2::GizmoMode::Translate;
+            else if (mode == "rotate")
+                args.gizmoMode = engine2::GizmoMode::Rotate;
+            else if (mode == "scale")
+                args.gizmoMode = engine2::GizmoMode::Scale;
+            else throw std::invalid_argument(
+                "--gizmo-mode requires move, rotate or scale");
+        } else if (arg == "--gizmo-snap" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--gizmo-snap", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--gizmo-snap requires 0 or 1");
+            args.gizmoSnap = value != 0.0f;
+        } else if (arg == "--gizmo-grid" && i + 1 < argc) {
+            args.gizmoGridStep = parseSetting(argv[++i], "--gizmo-grid", 0.05f, 20.0f);
         } else if (arg == "--gui-select" && i + 1 < argc) {
             const std::string value(argv[++i]);
             std::size_t parsed = 0;
@@ -320,6 +340,8 @@ int run(int argc, char** argv) {
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
                      "               [--gui 0|1] [--gui-select entity-index] [--gizmo 0|1]\n"
+                     "               [--gizmo-mode move|rotate|scale] [--gizmo-snap 0|1]\n"
+                     "               [--gizmo-grid 0.05..20]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Ctrl+Z undo, Ctrl+Y redo, Tab cursor, Esc exit.\n";
@@ -544,6 +566,9 @@ int run(int argc, char** argv) {
     engine2::SceneGui gui(window);
     if (args.guiSelection) gui.selectIndex(world, *args.guiSelection);
     gui.setGizmoEnabled(args.gizmoEnabled.value_or(true));
+    gui.setGizmoMode(args.gizmoMode.value_or(engine2::GizmoMode::Translate));
+    gui.setSnapping(args.gizmoSnap.value_or(false));
+    gui.setGridStep(args.gizmoGridStep.value_or(0.5f));
     gui.setVisible(args.guiVisible.value_or(!args.frames.has_value()));
     if (gui.visible() && !args.loadScene && !args.editScene) {
         // Initialize demo light entities now; they remain paused in edit mode.
@@ -674,6 +699,9 @@ int run(int argc, char** argv) {
                   << " bloomLevels=" << stats.bloomMipLevels
                   << " guiVisible=" << (gui.visible() ? 1 : 0)
                   << " gizmoEnabled=" << (gui.gizmoEnabled() ? 1 : 0)
+                  << " gizmoMode=" << static_cast<int>(gui.gizmoMode())
+                  << " gizmoSnap=" << (gui.snapping() ? 1 : 0)
+                  << " gizmoGrid=" << gui.gridStep()
                   << " editorUndoCount=" << gui.undoCount()
                   << " editorRedoCount=" << gui.redoCount();
         const auto sceneStats = world.stats();

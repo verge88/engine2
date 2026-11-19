@@ -28,6 +28,14 @@ void textVec3(const char* title, const glm::vec3& value) {
     ImGui::Text("%s: %.2f, %.2f, %.2f", title, value.x, value.y, value.z);
 }
 
+bool differentMatrix(const glm::mat4& a, const glm::mat4& b) {
+    for (int column=0; column<4; ++column)
+        for (int row=0; row<4; ++row)
+            if (std::abs(a[column][row]-b[column][row]) > 1.0e-5f)
+                return true;
+    return false;
+}
+
 } // namespace
 
 SceneGui::SceneGui(GLFWwindow* window) : window_(window) {
@@ -62,6 +70,12 @@ void SceneGui::setVisible(bool visible) {
     activeAxisCheckpointed_ = false;
     glfwSetInputMode(window_, GLFW_CURSOR,
                      visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+}
+
+void SceneGui::setGridStep(float value) {
+    if (!std::isfinite(value) || value < 0.05f || value > 20.0f)
+        throw std::invalid_argument("Gizmo grid step must be 0.05..20");
+    gridStep_ = value;
 }
 
 void SceneGui::choose(Scene& scene, Entity entity) {
@@ -355,7 +369,6 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
         activeAxisCheckpointed_=false;
         return;
     }
-
     ImGuiIO& io=ImGui::GetIO();
     const glm::vec2 screen(io.DisplaySize.x,io.DisplaySize.y);
     if (screen.x < 128 || screen.y < 128) return;
@@ -364,6 +377,13 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
     const float worldLength=glm::clamp(distance*0.105f,0.65f,2.5f);
     const glm::mat4 vp=camera.projectionMatrix(screen.x/screen.y)*
                        camera.viewMatrix();
+    const auto origin=projectGizmoPoint(vp,center,screen);
+    if (!origin || origin->x < -30 || origin->x > screen.x+30 ||
+        origin->y < -30 || origin->y > screen.y+30) {
+        activeAxis_=-1;
+        return;
+    }
+
     const std::array<glm::vec3,3> axes{
         glm::vec3(1,0,0),glm::vec3(0,1,0),glm::vec3(0,0,1)
     };
@@ -372,88 +392,143 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
         IM_COL32(90,159,250,255)
     };
     const char* labels[]={"X","Y","Z"};
-    std::array<std::optional<GizmoAxisProjection>,3> projected;
-    const auto origin=projectGizmoPoint(vp,center,screen);
-    if (!origin || origin->x < -30 || origin->x > screen.x+30 ||
-        origin->y < -30 || origin->y > screen.y+30) {
-        activeAxis_=-1;
-        return;
-    }
-
+    const GizmoMode mode=static_cast<GizmoMode>(gizmoMode_);
     const ImVec2 mouse=io.MousePos;
     const glm::vec2 pointer(mouse.x,mouse.y);
+    ImDrawList* list=ImGui::GetForegroundDrawList();
+    std::array<std::optional<GizmoAxisProjection>,3> projected;
     int hovered=-1;
-    float closest=11.0f;
-    for (int i=0;i<3;++i) {
-        projected[static_cast<std::size_t>(i)] =
-            projectGizmoAxis(vp,center,axes[static_cast<std::size_t>(i)],
-                             screen,worldLength);
-        const auto& axis=projected[static_cast<std::size_t>(i)];
-        if (!axis) continue;
-        const float d=gizmoSegmentDistance(pointer,*axis);
-        if (d < closest) {
-            closest=d;
-            hovered=i;
+    float nearest=10.0f;
+
+    if (mode == GizmoMode::Rotate) {
+        // Three true 3D rings (planes perpendicular to world X/Y/Z),
+        // projected through the stable camera matrix.
+        constexpr int segments=64;
+        for (int axis=0; axis<3; ++axis) {
+            std::optional<glm::vec2> previous;
+            float minimum=1.0e6f;
+            for (int j=0;j<=segments;++j) {
+                const float angle=glm::two_pi<float>() *
+                                  static_cast<float>(j) / segments;
+                const auto sample=projectGizmoPoint(
+                    vp,gizmoRingPoint(center,axis,angle,worldLength*0.80f),
+                    screen);
+                if (sample && previous) {
+                    minimum=std::min(minimum,gizmoSegmentDistance(
+                        pointer,{*previous,*sample,1.0f}));
+                }
+                previous=sample;
+            }
+            if (minimum<nearest) {
+                hovered=axis;
+                nearest=minimum;
+            }
+        }
+        for (int axis=0;axis<3;++axis) {
+            const ImU32 color=(axis==activeAxis_ || axis==hovered)
+                ? IM_COL32(255,235,110,255) : colors[static_cast<std::size_t>(axis)];
+            std::optional<glm::vec2> previous;
+            for (int j=0;j<=segments;++j) {
+                const float angle=glm::two_pi<float>() *
+                                  static_cast<float>(j) / segments;
+                const auto sample=projectGizmoPoint(
+                    vp,gizmoRingPoint(center,axis,angle,worldLength*0.80f),
+                    screen);
+                if (sample && previous) {
+                    list->AddLine(ImVec2(previous->x,previous->y),
+                                  ImVec2(sample->x,sample->y),color,
+                                  axis==hovered || axis==activeAxis_ ? 3.8f : 2.5f);
+                }
+                previous=sample;
+            }
+        }
+    } else {
+        for(int axis=0;axis<3;++axis) {
+            auto& projection=projected[static_cast<std::size_t>(axis)];
+            projection=projectGizmoAxis(
+                vp,center,axes[static_cast<std::size_t>(axis)],screen,worldLength);
+            if (!projection) continue;
+            const float delta=gizmoSegmentDistance(pointer,*projection);
+            if (delta<nearest) {
+                hovered=axis;
+                nearest=delta;
+            }
+        }
+        for(int axis=0;axis<3;++axis) {
+            const auto& projection=projected[static_cast<std::size_t>(axis)];
+            if (!projection) continue;
+            const ImVec2 from(projection->origin.x,projection->origin.y);
+            const ImVec2 to(projection->tip.x,projection->tip.y);
+            const bool selected=axis==activeAxis_ || axis==hovered;
+            const ImU32 color=selected ? IM_COL32(255,235,110,255) :
+                colors[static_cast<std::size_t>(axis)];
+            list->AddLine(from,to,color,selected ? 5.0f : 3.5f);
+            if (mode==GizmoMode::Scale)
+                list->AddRectFilled(ImVec2(to.x-6,to.y-6),
+                                    ImVec2(to.x+6,to.y+6),color);
+            else
+                list->AddCircleFilled(to,selected ? 8.0f : 6.0f,color,16);
+            list->AddText(ImVec2(to.x+9,to.y-8),color,labels[axis]);
         }
     }
 
-    bool startedDrag = false;
-    if (activeAxis_ < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) && hovered >= 0) {
+    list->AddCircleFilled(ImVec2(origin->x,origin->y),4,
+                          IM_COL32(240,240,240,255),16);
+
+    bool started=false;
+    if (activeAxis_<0 && hovered>=0 &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
         activeAxis_=hovered;
         activeAxisCheckpointed_=false;
-        startedDrag = true;
+        dragStartLocal_=scene.localTransform(selected_);
+        dragParentWorld_=scene.parent(selected_)
+            ? scene.worldTransform(scene.parent(selected_)) : glm::mat4(1.0f);
+        dragMouseStart_=pointer;
+        dragMousePrevious_=pointer;
+        dragCenterScreen_=*origin;
+        dragAngle_=0.0f;
+        if (mode!=GizmoMode::Rotate && projected[static_cast<std::size_t>(hovered)])
+            dragProjection_=*projected[static_cast<std::size_t>(hovered)];
+        started=true;
     }
 
-    if (activeAxis_ >= 0) {
+    if (activeAxis_>=0) {
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             activeAxis_=-1;
             activeAxisCheckpointed_=false;
-        } else {
-            const auto& axis=projected[static_cast<std::size_t>(activeAxis_)];
-            if (axis) {
-                const glm::vec2 delta(io.MouseDelta.x,io.MouseDelta.y);
-                const float move=gizmoAxisDragDistance(*axis,delta);
-                if (!startedDrag && std::abs(move) > 1.0e-7f) {
-                    const glm::vec3 worldPosition=center+
-                        axes[static_cast<std::size_t>(activeAxis_)]*move;
-                    glm::mat4 parentWorld(1.0f);
-                    if (const Entity parent=scene.parent(selected_))
-                        parentWorld=scene.worldTransform(parent);
-                    if (std::abs(glm::determinant(parentWorld)) < 1.0e-8f) {
-                        status_="Cannot translate under a singular parent";
-                        activeAxis_=-1;
-                    } else {
-                        if (!activeAxisCheckpointed_) {
-                            history_.checkpoint(scene);
-                            activeAxisCheckpointed_=true;
-                        }
-                        glm::mat4 local=scene.localTransform(selected_);
-                        local[3]=glm::inverse(parentWorld)*
-                                 glm::vec4(worldPosition,1.0f);
-                        scene.setLocalTransform(selected_,local);
-                        edited_=true;
+        } else if (!started) {
+            float drag=0.0f;
+            if (mode==GizmoMode::Rotate) {
+                dragAngle_+=gizmoPointerAngleDelta(dragCenterScreen_,
+                                                   dragMousePrevious_,pointer);
+                dragAngle_=glm::clamp(dragAngle_,-glm::two_pi<float>()*8.0f,
+                                      glm::two_pi<float>()*8.0f);
+                drag=dragAngle_;
+            } else {
+                drag=gizmoFullAxisDrag(dragProjection_,pointer-dragMouseStart_);
+                if (mode==GizmoMode::Scale)
+                    drag/=std::max(dragProjection_.worldLength,0.01f);
+            }
+            try {
+                const glm::mat4 next=applyGizmoTransform(
+                    dragStartLocal_,dragParentWorld_,mode,activeAxis_,drag,
+                    snapping_,gridStep_);
+                if (differentMatrix(next,scene.localTransform(selected_))) {
+                    if (!activeAxisCheckpointed_) {
+                        history_.checkpoint(scene);
+                        activeAxisCheckpointed_=true;
                     }
+                    scene.setLocalTransform(selected_,next);
+                    edited_=true;
                 }
+            } catch(const std::exception& error) {
+                status_=error.what();
+                activeAxis_=-1;
             }
         }
     }
-
-    ImDrawList* list=ImGui::GetForegroundDrawList();
-    for (int i=0;i<3;++i) {
-        const auto& axis=projected[static_cast<std::size_t>(i)];
-        if (!axis) continue;
-        const ImVec2 a(axis->origin.x,axis->origin.y);
-        const ImVec2 b(axis->tip.x,axis->tip.y);
-        const bool highlighted=i==activeAxis_ || i==hovered;
-        const ImU32 color=highlighted ? IM_COL32(255,235,110,255)
-                                     : colors[static_cast<std::size_t>(i)];
-        list->AddLine(a,b,color,highlighted ? 5.0f : 3.5f);
-        list->AddCircleFilled(b,highlighted ? 8.0f : 6.0f,color,16);
-        list->AddText(ImVec2(b.x+9,b.y-8),color,labels[i]);
-    }
-    list->AddCircleFilled(ImVec2(origin->x,origin->y),4,
-                          IM_COL32(240,240,240,255),16);
+    dragMousePrevious_=pointer;
 }
 
 void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
@@ -482,7 +557,7 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         ImGui::Text("Entities: %zu   Meshes: %zu   Lights: %zu   Bodies: %zu",
                     stats.entities,stats.renderables,stats.pointLights,
                     stats.rigidBodies);
-        ImGui::TextDisabled("F1: camera   Drag X/Y/Z handles to move objects");
+        ImGui::TextDisabled("F1: camera   Move / Rotate / Scale X,Y,Z in viewport");
         ImGui::BeginDisabled(!history_.canUndo());
         if (ImGui::Button("Undo (Ctrl+Z)")) undo(scene);
         ImGui::EndDisabled();
@@ -492,7 +567,21 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::TextDisabled("%zu / %zu",history_.undoCount(),history_.redoCount());
-        ImGui::Checkbox("Viewport move gizmo",&gizmoEnabled_);
+        ImGui::Checkbox("Viewport gizmo",&gizmoEnabled_);
+        const int previousMode=gizmoMode_;
+        ImGui::RadioButton("Move",&gizmoMode_,0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Rotate",&gizmoMode_,1);
+        ImGui::SameLine();
+        ImGui::RadioButton("Scale",&gizmoMode_,2);
+        if (gizmoMode_!=previousMode) activeAxis_=-1;
+        ImGui::Checkbox("Snap (grid / 15 deg / 0.25 scale)",&snapping_);
+        if (snapping_) {
+            ImGui::SetNextItemWidth(145.0f);
+            if (ImGui::DragFloat("Grid step", &gridStep_,
+                                 0.05f, 0.05f, 20.0f, "%.2f"))
+                gridStep_=glm::clamp(gridStep_,0.05f,20.0f);
+        }
 
         drawHierarchy(scene);
         if (ImGui::Button("Create empty entity")) {

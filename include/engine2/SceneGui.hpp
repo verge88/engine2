@@ -31,6 +31,17 @@ public:
     void selectIndex(const Scene& scene, std::size_t index);
     void setGizmoEnabled(bool enabled) { gizmoEnabled_ = enabled; }
     [[nodiscard]] bool gizmoEnabled() const { return gizmoEnabled_; }
+    void setGizmoMode(GizmoMode mode) {
+        gizmoMode_ = static_cast<int>(mode);
+        activeAxis_ = -1;
+    }
+    [[nodiscard]] GizmoMode gizmoMode() const {
+        return static_cast<GizmoMode>(gizmoMode_);
+    }
+    void setSnapping(bool enabled) { snapping_ = enabled; }
+    [[nodiscard]] bool snapping() const { return snapping_; }
+    void setGridStep(float gridStep);
+    [[nodiscard]] float gridStep() const { return gridStep_; }
     [[nodiscard]] std::size_t undoCount() const { return history_.undoCount(); }
     [[nodiscard]] std::size_t redoCount() const { return history_.redoCount(); }
     // Call after Renderer::render and before screenshot/glfwSwapBuffers.
@@ -52,8 +63,18 @@ private:
     bool visible_ = false;
     bool edited_ = false;
     bool gizmoEnabled_ = true;
+    int gizmoMode_ = 0; // 0 translate, 1 rotate, 2 scale
+    bool snapping_ = false;
+    float gridStep_ = 0.5f;
     int activeAxis_ = -1;
     bool activeAxisCheckpointed_ = false;
+    glm::mat4 dragStartLocal_{1.0f};
+    glm::mat4 dragParentWorld_{1.0f};
+    GizmoAxisProjection dragProjection_{};
+    glm::vec2 dragMouseStart_{0.0f};
+    glm::vec2 dragMousePrevious_{0.0f};
+    glm::vec2 dragCenterScreen_{0.0f};
+    float dragAngle_ = 0.0f;
     std::optional<Scene> widgetBefore_;
     bool widgetChanged_ = false;
     SceneHistory history_{64};

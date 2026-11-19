@@ -124,16 +124,25 @@
 - [x] Правильная конвертация мирового перемещения через inverse parent transform
 - [x] --gizmo 0|1, диагностические счётчики истории, CPU math/unit и headless image tests
 
-## v1.7 — редактор и физика (план)
-- [ ] Rotation/scale gizmos, grid snapping, viewport entity picking, asset browser
+## v1.7 — режимы 3D-гизмо и привязка к сетке (готово)
+- [x] Move / Rotate / Scale режимы в редакторе Dear ImGui
+- [x] Проецируемые 3D-кольца X/Y/Z для вращения вокруг мировых осей
+- [x] Масштабирование по локальным осям с квадратными ручками
+- [x] Отсчёт жеста от исходной матрицы, без накопления дрейфа при снаппинге
+- [x] Grid snap на мировой позиции с настраиваемым шагом; 15° и 0.25x для вращения/масштаба
+- [x] Поддержка нетривиальных parent matrices и атомарного undo одного жеста
+- [x] CLI --gizmo-mode, --gizmo-snap, --gizmo-grid; численные и OpenGL-тесты
+
+## v1.8 — инструменты сцены и физика (план)
+- [ ] Выделение объектов кликом непосредственно в viewport и multi-select
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
-- [ ] Asset-bundle/portable asset paths, миграции JSON schema
+- [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
 - [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v1.8+ — крупные игровые системы (план)
+## v1.9+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

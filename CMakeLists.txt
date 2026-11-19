@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.6.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -158,6 +158,11 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(engine2_gizmo_math_tests PRIVATE glm::glm)
     add_test(NAME viewport-gizmo-math-unit COMMAND engine2_gizmo_math_tests)
+    add_executable(engine2_gizmo_transform_tests tests/gizmo_transform_test.cpp)
+    target_link_libraries(engine2_gizmo_transform_tests PRIVATE glm::glm)
+    target_include_directories(engine2_gizmo_transform_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME gizmo-transform-snap-unit COMMAND engine2_gizmo_transform_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -339,6 +344,13 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(viewport-gizmo-overlay-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME gizmo-modes-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_gizmo_modes.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(gizmo-modes-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 
