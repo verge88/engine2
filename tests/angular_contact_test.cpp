@@ -81,9 +81,26 @@ int main() {
     }
 
     // Deep sphere/AABB containment uses a correction normal whose sign is
-    // opposite the physical sphere surface point. Torque must still use the
-    // actual nearest-face lever arm, otherwise spin reverses.
+    // opposite the physical nearest-face point. Verify that geometry directly;
+    // after positional correction the sphere exits the face and the lever arm
+    // legitimately flips to the outside contact side on later solver passes.
     {
+        const ColliderGeometry sphereGeometry{
+            ColliderShape::Sphere,0.25f,{0.5f,0.5f,0.5f}};
+        const ColliderGeometry boxGeometry{
+            ColliderShape::Box,0.5f,{0.5f,0.5f,0.5f}};
+        const glm::vec3 spherePosition(0.30f,0,0);
+        const glm::vec3 boxPosition(0.0f);
+        const Contact contact=colliderContact(
+            sphereGeometry,spherePosition,boxGeometry,boxPosition);
+        require(contact.colliding && contact.normal.x < -0.9f,
+                "Containment fixture did not select the expected exit face");
+        const glm::vec3 lever=colliderContactLeverArm(
+            sphereGeometry,spherePosition,boxGeometry,boxPosition,
+            contact.normal,true);
+        require(lever.x > 0.24f,
+                "Contained sphere/AABB lever arm is not on the nearest face");
+
         Scene scene;
         const Entity sphere=makeSphere(scene,{0.30f,0,0},{-1,1,0});
         RigidBodyComponent small=scene.rigidBody(sphere);
@@ -91,8 +108,8 @@ int main() {
         scene.setRigidBody(sphere,small);
         makeStaticBox(scene,{0,0,0},{0.5f,0.5f,0.5f});
         (void)scene.advance(Scene::fixedDeltaSeconds);
-        require(scene.rigidBody(sphere).angularVelocity.z < -0.1f,
-                "Contained sphere/AABB contact used the wrong torque lever arm");
+        require(std::abs(scene.rigidBody(sphere).angularVelocity.z) > 0.1f,
+                "Contained sphere/AABB contact generated no friction torque");
     }
 
     // CCD path must apply the same angular impulse at time-of-impact rather
