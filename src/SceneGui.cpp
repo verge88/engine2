@@ -382,7 +382,8 @@ void SceneGui::drawProperties(Scene& scene) {
         });
 
         const bool angularEditable=
-            body.shape==ColliderShape::Sphere && !body.isStatic;
+            !body.isStatic &&
+            !(body.shape==ColliderShape::Box && body.continuous);
         float angular[3]{
             body.angularVelocity.x,body.angularVelocity.y,body.angularVelocity.z
         };
@@ -397,8 +398,12 @@ void SceneGui::drawProperties(Scene& scene) {
                 angular[0],angular[1],angular[2]);
             working.setRigidBody(entity,modified);
         });
-        if (!angularEditable)
-            ImGui::TextDisabled("Angular velocity: dynamic sphere only");
+        if (!angularEditable) {
+            if (body.shape==ColliderShape::Box && body.continuous)
+                ImGui::TextDisabled("Box rotation: disable CCD (translation-only)");
+            else
+                ImGui::TextDisabled("Static bodies cannot rotate");
+        }
 
         float mass=scene.rigidBodyComponent(entity)->mass;
         const bool changedMass=ImGui::DragFloat("Mass",&mass,0.05f,0.01f,10000.0f);
@@ -466,7 +471,7 @@ void SceneGui::drawProperties(Scene& scene) {
             edited_=true;
         }
         ImGui::Text("Collider: %s",scene.rigidBodyComponent(entity)->shape ==
-                    ColliderShape::Box ? "AABB Box" : "Sphere");
+                    ColliderShape::Box ? "OBB Box" : "Sphere");
     }
     ImGui::Separator();
     if (ImGui::Button(selection_.size()>1 ? "Delete selected entities"
