@@ -194,8 +194,18 @@
 - [x] CPU-тесты moving/moving TOI, коридор двух стен, 3-body chain, лимит событий
 - [x] Xvfb/OpenGL изображение CCD on/off и сохранение коридора через Scene JSON
 
-## v2.4 — контакты и инструменты сцены (план)
-- [ ] Точное sphere/AABB corner CCD, CCD динамика-box и sustained high-speed contacts
+## v2.4 — точная CCD геометрия AABB (готово)
+- [x] Аналитический sphere sweep против точного rounded-box (Minkowski sum)
+- [x] Шесть плоских граней с корректными нормалями первого контакта
+- [x] Двенадцать цилиндрических участков рёбер, включая диагональные нормали
+- [x] Восемь сферических участков углов, отбрасывание ложных AABB попаданий
+- [x] Double precision при поиске корней, тест движения внутрь/наружу касающейся сферы
+- [x] Статистика sceneCcdBoxFaceHits/EdgeHits/CornerHits
+- [x] 361 аналитически проверенная траектория + интеграция со Scene
+- [x] Xvfb/OpenGL регрессия по изображениям и сохранение состояния Scene JSON
+
+## v2.5 — развитие физики и инструментов сцены (план)
+- [ ] CCD динамических коробок и устойчивые длительные контакты на больших скоростях
 - [ ] Persistent contact manifolds, angular dynamics, joints и вращающиеся OBB
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
@@ -204,7 +214,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.5+ — крупные игровые системы (план)
+## v2.6+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

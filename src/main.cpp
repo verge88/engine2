@@ -809,6 +809,9 @@ int run(int argc, char** argv) {
                   << " sceneCcdHits=" << sceneStats.ccdHits
                   << " sceneCcdDynamicHits=" << sceneStats.ccdDynamicHits
                   << " sceneCcdBudgetExhaustions=" << sceneStats.ccdBudgetExhaustions
+                  << " sceneCcdBoxFaceHits=" << sceneStats.ccdBoxFaceHits
+                  << " sceneCcdBoxEdgeHits=" << sceneStats.ccdBoxEdgeHits
+                  << " sceneCcdBoxCornerHits=" << sceneStats.ccdBoxCornerHits
                   << " sceneSphereContacts=" << sceneStats.sphereContacts
                   << " sceneBoxContacts=" << sceneStats.boxContacts
                   << " sceneSolverPasses=" << sceneStats.solverPasses;

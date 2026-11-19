@@ -273,6 +273,9 @@ SceneStats Scene::stats() const {
     result.ccdHits = ccdHits_;
     result.ccdDynamicHits = ccdDynamicHits_;
     result.ccdBudgetExhaustions = ccdBudgetExhaustions_;
+    result.ccdBoxFaceHits = ccdBoxFaceHits_;
+    result.ccdBoxEdgeHits = ccdBoxEdgeHits_;
+    result.ccdBoxCornerHits = ccdBoxCornerHits_;
     result.sphereContacts = sphereContacts_;
     result.boxContacts = boxContacts_;
     result.solverPasses = solverPasses_;
@@ -459,6 +462,12 @@ void Scene::fixedStep() {
             }
             ++ccdHits_;
             if (!a.isStatic && !b.isStatic) ++ccdDynamicHits_;
+            switch (earliest->feature) {
+                case SweptContactFeature::Face: ++ccdBoxFaceHits_; break;
+                case SweptContactFeature::Edge: ++ccdBoxEdgeHits_; break;
+                case SweptContactFeature::Corner: ++ccdBoxCornerHits_; break;
+                case SweptContactFeature::Sphere: break;
+            }
         }
         // Bound the time spent in a pathological corridor of tiny contacts.
         // Unsimulated remainder falls back to discrete resolution and is
