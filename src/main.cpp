@@ -73,6 +73,7 @@ struct Arguments {
     std::optional<float> fixedLightTime;
     bool physicsDemo = false;
     bool collisionDemo = false;
+    bool boxDemo = false;
     std::optional<float> simulationDelta;
     bool stats = false;
     bool help = false;
@@ -133,6 +134,11 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--collision-demo requires 0 or 1");
             args.collisionDemo = value != 0.0f;
+        } else if (arg == "--box-demo" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--box-demo", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--box-demo requires 0 or 1");
+            args.boxDemo = value != 0.0f;
         } else if (arg == "--sim-dt" && i + 1 < argc) {
             args.simulationDelta = parseSetting(argv[++i], "--sim-dt", 0.0f, 0.25f);
         } else if (arg == "--lights" && i + 1 < argc) {
@@ -280,7 +286,8 @@ int run(int argc, char** argv) {
                      "               [--ssao 0|1] [--culling 0|1] [--auto-exposure 0|1]\n"
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
-                     "               [--physics-demo 0|1] [--collision-demo 0|1] [--sim-dt 0..0.25]\n"
+                     "               [--physics-demo 0|1] [--collision-demo 0|1] [--box-demo 0|1]\n"
+                     "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
@@ -288,9 +295,9 @@ int run(int argc, char** argv) {
         return 0;
     }
 
-    if ((args.physicsDemo || args.collisionDemo) && args.model)
+    if ((args.physicsDemo || args.collisionDemo || args.boxDemo) && args.model)
         throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
-    if (args.loadScene && (args.physicsDemo || args.collisionDemo))
+    if (args.loadScene && (args.physicsDemo || args.collisionDemo || args.boxDemo))
         throw std::invalid_argument("--load-scene cannot be combined with physics/collision demos");
 
     GlfwSession session;
@@ -322,6 +329,7 @@ int run(int argc, char** argv) {
     std::optional<engine2::LoadedScene> imported;
     std::unique_ptr<engine2::Mesh> sphere;
     std::unique_ptr<engine2::Mesh> floor;
+    std::unique_ptr<engine2::Mesh> cube;
     std::vector<engine2::RenderItem> initialScene;
     engine2::SceneAssetRegistry assetRegistry;
     if (args.model) {
@@ -342,6 +350,8 @@ int run(int argc, char** argv) {
     } else {
         sphere = std::make_unique<engine2::Mesh>(engine2::Mesh::sphere());
         floor = std::make_unique<engine2::Mesh>(engine2::Mesh::plane());
+        cube = std::make_unique<engine2::Mesh>(engine2::Mesh::cube());
+        assetRegistry.registerMesh("procedural/cube", cube.get());
         assetRegistry.registerMesh("procedural/sphere", sphere.get());
         assetRegistry.registerMesh("procedural/floor", floor.get());
         initialScene = createScene(*sphere, *floor);
@@ -430,6 +440,50 @@ int run(int argc, char** argv) {
             world.setRigidBody(handles[static_cast<std::size_t>(i)], body);
         }
         collisionBalls = handles;
+    }
+
+    std::optional<std::array<engine2::Entity, 2>> boxDemoEntities;
+    if (args.boxDemo) {
+        // One static AABB and a dynamic sphere with a world-space radius.
+        // Demonstrates contact generation and impulse response without a
+        // dependency on the mesh scale or the procedural floor mesh.
+        std::array<engine2::Entity, 2> handles{
+            world.createEntity("Box obstacle"),
+            world.createEntity("Sphere projectile")
+        };
+        glm::mat4 obstacleModel =
+            glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.15f, 1.5f));
+        obstacleModel = glm::scale(obstacleModel, glm::vec3(1.0f));
+        world.setLocalTransform(handles[0], obstacleModel);
+        engine2::Material boxMaterial;
+        boxMaterial.albedo = glm::vec3(0.08f, 0.65f, 0.75f);
+        boxMaterial.metallic = 0.30f;
+        boxMaterial.roughness = 0.36f;
+        world.setRenderer(handles[0], {cube.get(), boxMaterial});
+        engine2::RigidBodyComponent boxBody;
+        boxBody.shape = engine2::ColliderShape::Box;
+        boxBody.halfExtents = glm::vec3(0.5f);
+        boxBody.isStatic = true;
+        boxBody.gravity = false;
+        boxBody.restitution = 0.85f;
+        world.setRigidBody(handles[0], boxBody);
+
+        glm::mat4 sphereModel =
+            glm::translate(glm::mat4(1.0f), glm::vec3(-1.65f, 1.15f, 1.5f));
+        sphereModel = glm::scale(sphereModel, glm::vec3(0.45f));
+        world.setLocalTransform(handles[1], sphereModel);
+        engine2::Material ballMaterial;
+        ballMaterial.albedo = glm::vec3(0.92f, 0.18f, 0.13f);
+        ballMaterial.metallic = 0.05f;
+        ballMaterial.roughness = 0.25f;
+        world.setRenderer(handles[1], {sphere.get(), ballMaterial});
+        engine2::RigidBodyComponent sphereBody;
+        sphereBody.radius = 0.45f;
+        sphereBody.gravity = false;
+        sphereBody.restitution = 0.85f;
+        sphereBody.velocity = glm::vec3(3.2f, 0.0f, 0.0f);
+        world.setRigidBody(handles[1], sphereBody);
+        boxDemoEntities = handles;
     }
 
     double lastTime = glfwGetTime();
@@ -540,7 +594,8 @@ int run(int argc, char** argv) {
                   << " sceneBodies=" << sceneStats.rigidBodies
                   << " sceneFixedSteps=" << sceneStats.fixedSteps
                   << " sceneBroadphasePairs=" << sceneStats.broadphasePairs
-                  << " sceneSphereContacts=" << sceneStats.sphereContacts;
+                  << " sceneSphereContacts=" << sceneStats.sphereContacts
+                  << " sceneBoxContacts=" << sceneStats.boxContacts;
         if (fallingSphere) {
             std::cout << " physicsY=" << world.worldTransform(*fallingSphere)[3][1];
         }
@@ -552,6 +607,14 @@ int run(int argc, char** argv) {
                          world.worldTransform(a)[3][0]
                       << " collisionVelocityA=" << world.rigidBody(a).velocity.x
                       << " collisionVelocityB=" << world.rigidBody(b).velocity.x;
+        }
+        if (boxDemoEntities) {
+            const auto& obstacle = (*boxDemoEntities)[0];
+            const auto& projectile = (*boxDemoEntities)[1];
+            std::cout << " boxObstacleX=" << world.worldTransform(obstacle)[3][0]
+                      << " boxSphereX=" << world.worldTransform(projectile)[3][0]
+                      << " boxSphereVelocityX="
+                      << world.rigidBody(projectile).velocity.x;
         }
         std::cout << '\n';
     }

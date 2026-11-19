@@ -206,6 +206,10 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
     if (!finite(body.velocity) || !std::isfinite(body.radius) ||
         !std::isfinite(body.groundHeight) || !std::isfinite(body.restitution) ||
         !std::isfinite(body.mass) || body.mass <= 0.0f ||
+        !finite(body.halfExtents) ||
+        body.halfExtents.x <= 0.0f || body.halfExtents.y <= 0.0f ||
+        body.halfExtents.z <= 0.0f ||
+        (body.shape != ColliderShape::Sphere && body.shape != ColliderShape::Box) ||
         body.radius <= 0.0f || body.restitution < 0.0f || body.restitution > 1.0f)
         throw std::invalid_argument("Invalid rigid body parameters");
     slot.body = body;
@@ -251,6 +255,7 @@ SceneStats Scene::stats() const {
     result.fixedSteps = totalSteps_;
     result.broadphasePairs = broadphasePairs_;
     result.sphereContacts = sphereContacts_;
+    result.boxContacts = boxContacts_;
     for (const Slot& slot : slots_) {
         if (!slot.alive) continue;
         ++result.entities;
@@ -265,27 +270,26 @@ void Scene::fixedStep() {
     struct Candidate {
         std::uint32_t slot;
         glm::vec3 position;
-        float radius;
+        glm::vec3 half;
         float minX;
         float maxX;
     };
     std::vector<Candidate> candidates;
     candidates.reserve(slots_.size());
 
-    // Semi-implicit Euler: integrate velocity first, then translate. Fixed
-    // 60 Hz makes frame grouping deterministic. Static spheres are infinite-
-    // mass obstacles and never move in response to contacts.
+    // Semi-implicit Euler. Physics colliders are unrotated, translated
+    // shapes in world units and static bodies have infinite mass.
     for (std::size_t i = 0; i < slots_.size(); ++i) {
         Slot& slot = slots_[i];
         if (!slot.alive || !slot.enabled || !slot.body) continue;
         RigidBodyComponent& body = *slot.body;
+        const ColliderGeometry geometry{body.shape, body.radius, body.halfExtents};
+        const glm::vec3 half = colliderHalfExtents(geometry);
         glm::vec3 position(slot.local[3]);
         if (!body.isStatic) {
-            if (body.gravity)
-                body.velocity.y -= 9.81f * fixedDeltaSeconds;
+            if (body.gravity) body.velocity.y -= 9.81f * fixedDeltaSeconds;
             position += body.velocity * fixedDeltaSeconds;
-
-            const float minimumY = body.groundHeight + body.radius;
+            const float minimumY = body.groundHeight + half.y;
             if (position.y < minimumY) {
                 position.y = minimumY;
                 if (body.velocity.y < 0.0f) {
@@ -296,14 +300,13 @@ void Scene::fixedStep() {
             slot.local[3] = glm::vec4(position, 1.0f);
         }
         candidates.push_back({
-            static_cast<std::uint32_t>(i), position, body.radius,
-            position.x - body.radius, position.x + body.radius
+            static_cast<std::uint32_t>(i), position, half,
+            position.x - half.x, position.x + half.x
         });
     }
 
-    // Sweep-and-prune broadphase: only x-interval overlaps reach the
-    // remaining y/z and narrowphase tests. Sort by x, then entity slot for a
-    // deterministic order, even if the same positions are repeated.
+    // Sweep-and-prune on the X intervals, then Y/Z AABB overlap. The
+    // narrowphase handles sphere-sphere, sphere-box, and AABB-AABB.
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) {
                   if (a.minX != b.minX) return a.minX < b.minX;
@@ -321,62 +324,52 @@ void Scene::fixedStep() {
             RigidBodyComponent& b = *bSlot.body;
             if (a.isStatic && b.isStatic) continue;
             ++broadphasePairs_;
-
-            const float combinedRadius = a.radius + b.radius;
             const glm::vec3 delta = second.position - first.position;
-            if (std::abs(delta.y) >= combinedRadius ||
-                std::abs(delta.z) >= combinedRadius) continue;
-            const float distanceSquared = glm::dot(delta, delta);
-            if (distanceSquared >= combinedRadius * combinedRadius) continue;
-            ++sphereContacts_;
+            if (std::abs(delta.y) >= first.half.y + second.half.y ||
+                std::abs(delta.z) >= first.half.z + second.half.z) continue;
 
-            // Fully coincident centers are possible when loading a scene.
-            // Choose a stable axis for the separation instead of dividing 0/0.
-            const float distance = std::sqrt(distanceSquared);
-            const glm::vec3 normal =
-                distance > 1.0e-6f ? delta / distance
-                                   : glm::vec3(1.0f, 0.0f, 0.0f);
+            const Contact contact = colliderContact(
+                {a.shape, a.radius, a.halfExtents}, first.position,
+                {b.shape, b.radius, b.halfExtents}, second.position);
+            if (!contact.colliding) continue;
+
+            if (a.shape == ColliderShape::Sphere &&
+                b.shape == ColliderShape::Sphere) ++sphereContacts_;
+            else ++boxContacts_;
+
             const float inverseA = a.isStatic ? 0.0f : 1.0f / a.mass;
             const float inverseB = b.isStatic ? 0.0f : 1.0f / b.mass;
             const float totalInverseMass = inverseA + inverseB;
-            if (totalInverseMass <= 0.0f) continue;
 
-            // Resolve the actual overlap, mass-weighted, before applying the
-            // collision impulse. Keep an explicit 0.0001f slop to avoid
-            // non-stop micro-corrections caused by float rounding.
-            const float penetration = combinedRadius - distance;
             const float correction =
-                std::max(penetration - 0.0001f, 0.0f) / totalInverseMass;
-            first.position -= normal * correction * inverseA;
-            second.position += normal * correction * inverseB;
-
+                std::max(contact.penetration - 0.0001f, 0.0f) / totalInverseMass;
+            first.position -= contact.normal * correction * inverseA;
+            second.position += contact.normal * correction * inverseB;
             const glm::vec3 relativeVelocity =
                 (b.isStatic ? glm::vec3(0.0f) : b.velocity) -
                 (a.isStatic ? glm::vec3(0.0f) : a.velocity);
-            const float closingSpeed = glm::dot(relativeVelocity, normal);
+            const float closingSpeed = glm::dot(relativeVelocity, contact.normal);
             if (closingSpeed < 0.0f) {
                 const float restitution = std::min(a.restitution, b.restitution);
-                const float impulseMagnitude =
-                    -(1.0f + restitution) * closingSpeed / totalInverseMass;
-                const glm::vec3 impulse = impulseMagnitude * normal;
+                const glm::vec3 impulse =
+                    -(1.0f + restitution) * closingSpeed /
+                    totalInverseMass * contact.normal;
                 if (!a.isStatic) a.velocity -= impulse * inverseA;
                 if (!b.isStatic) b.velocity += impulse * inverseB;
             }
-            // Keep candidate centers synchronized with the correction. The
-            // broadphase order is still based on pre-correction intervals.
             if (!a.isStatic) aSlot.local[3] = glm::vec4(first.position, 1.0f);
             if (!b.isStatic) bSlot.local[3] = glm::vec4(second.position, 1.0f);
         }
     }
 
-    // Sphere separation may push a body below its ground plane. Project it
-    // back above the plane after contact resolution to avoid floor tunneling.
+    // Reproject dynamic colliders above the configured floor, since pair
+    // separation may otherwise push an object through the plane.
     for (const Candidate& candidate : candidates) {
         Slot& slot = slots_[candidate.slot];
         RigidBodyComponent& body = *slot.body;
         if (body.isStatic) continue;
         glm::vec3 position(slot.local[3]);
-        const float minimumY = body.groundHeight + body.radius;
+        const float minimumY = body.groundHeight + candidate.half.y;
         if (position.y < minimumY) {
             position.y = minimumY;
             if (body.velocity.y < 0.0f) body.velocity.y = 0.0f;

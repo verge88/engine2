@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine2/Renderer.hpp"
+#include "engine2/CollisionMath.hpp"
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
@@ -46,6 +47,8 @@ struct RigidBodyComponent {
     float restitution = 0.35f;   // 0: no bounce, 1: full elastic bounce
     float mass = 1.0f;           // kilograms, strictly positive for dynamics
     bool isStatic = false;       // infinite mass, no integration
+    ColliderShape shape = ColliderShape::Sphere;
+    glm::vec3 halfExtents{0.5f}; // WORLD units, for AABB boxes only
 };
 
 struct SceneStats {
@@ -55,7 +58,8 @@ struct SceneStats {
     std::size_t rigidBodies = 0;
     std::uint64_t fixedSteps = 0;
     std::uint64_t broadphasePairs = 0; // accumulated x-axis overlap candidates
-    std::uint64_t sphereContacts = 0;  // accumulated resolved sphere contacts
+    std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
+    std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
 };
 
 // A small runtime object/component world rather than a data-oriented archetype
@@ -125,6 +129,7 @@ private:
     std::uint64_t totalSteps_ = 0;
     std::uint64_t broadphasePairs_ = 0;
     std::uint64_t sphereContacts_ = 0;
+    std::uint64_t boxContacts_ = 0;
 };
 
 } // namespace engine2

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.2.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -118,6 +118,9 @@ if(BUILD_TESTING)
     add_executable(engine2_scene_io_tests tests/scene_io_test.cpp)
     target_link_libraries(engine2_scene_io_tests PRIVATE engine2_core)
     add_test(NAME scene-json-io-unit COMMAND engine2_scene_io_tests)
+    add_executable(engine2_box_collision_tests tests/box_collision_test.cpp)
+    target_link_libraries(engine2_box_collision_tests PRIVATE engine2_core)
+    add_test(NAME box-collision-unit COMMAND engine2_box_collision_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -265,6 +268,13 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/alpha-mask.gltf")
         set_tests_properties(scene-json-roundtrip-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME box-collision-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_box_colliders.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(box-collision-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

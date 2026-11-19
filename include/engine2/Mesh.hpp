@@ -34,6 +34,7 @@ public:
 
     [[nodiscard]] static Mesh sphere(unsigned int sectors = 48, unsigned int stacks = 32);
     [[nodiscard]] static Mesh plane();
+    [[nodiscard]] static Mesh cube();
 
 private:
     void release() noexcept;
