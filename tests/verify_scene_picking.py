@@ -59,14 +59,14 @@ def main():
     directory.mkdir(parents=True,exist_ok=True)
 
     single,one=call(xvfb,binary,directory,"single",
-        "--gui-select",13,count=1,primary=13)
+        "--gui-select",23,count=1,primary=23)
     paired,two=call(xvfb,binary,directory,"paired",
-        "--gui-select",13,"--gui-add",14,count=2,primary=14)
+        "--gui-select",23,"--gui-add",24,count=2,primary=24)
     comparison(single,paired,"Multi-selected bounding rectangles",0.006,80)
 
     picked,ray=call(xvfb,binary,directory,"ray",
-        "--pick-screen",640,410,count=1,primary=13)
-    if "Scene ray pick: Mesh 13" not in ray:
+        "--pick-screen",640,467,count=1,primary=23)
+    if "Scene ray pick: Mesh 23" not in ray:
         raise AssertionError(f"Screen ray did not hit expected sphere: {ray}")
     if single[0] != picked[0]:
         raise AssertionError("Manual selection and ray selection viewport sizes differ")
@@ -77,11 +77,11 @@ def main():
           f"channels>=5: {visually_changed}")
     if mean_difference > 0.08 or visually_changed > len(pixel_differences)//2000:
         raise AssertionError("Ray picking and manual selection show different objects")
-    # A second sphere projects near (728,410) at the default FPS camera.
+    # A second FRONT-ROW sphere projects near (758,467) at the default FPS camera.
     additive,ray2=call(xvfb,binary,directory,"ray-additive",
-        "--pick-screen",640,410,"--pick-add",728,410,
-        count=2,primary=14)
-    if "Scene ray pick: Mesh 14" not in ray2:
+        "--pick-screen",640,467,"--pick-add",758,467,
+        count=2,primary=24)
+    if "Scene ray pick: Mesh 24" not in ray2:
         raise AssertionError(f"Additive ray did not hit second sphere: {ray2}")
     comparison(picked,additive,"Ctrl/Shift group ray-picking",0.006,80)
 
