@@ -36,9 +36,9 @@ struct MeshRendererComponent {
     Material material{};
 };
 
-// Unparented sphere collider with translation-only Newtonian response.
-// Collision radius is explicitly in world units (independent of mesh scale).
-// Static bodies have infinite mass and are moved by game code, not simulation.
+// Unparented translation-only collider with Newtonian response. Sphere radius
+// and AABB half extents are explicitly in world units (independent of mesh
+// scale). Static bodies have infinite mass and are moved by game code.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
     bool gravity = true;
@@ -49,7 +49,7 @@ struct RigidBodyComponent {
     float dynamicFriction = 0.0f;// <= staticFriction, sliding resistance
     float mass = 1.0f;           // kilograms, strictly positive for dynamics
     bool isStatic = false;       // infinite mass, no integration
-    bool continuous = false;     // opt-in sweep against static shapes / other CCD spheres
+    bool continuous = false;     // opt-in translation CCD; moving peers also opt in
     ColliderShape shape = ColliderShape::Sphere;
     glm::vec3 halfExtents{0.5f}; // WORLD units, for AABB boxes only
 };
@@ -63,8 +63,8 @@ struct SceneStats {
     std::uint64_t broadphasePairs = 0; // 3D spatial-grid overlapping pairs
     std::uint64_t broadphaseCells = 0; // accumulated occupied grid cells
     std::uint64_t broadphaseTests = 0; // accumulated cell pair checks
-    std::uint64_t ccdHits = 0;         // all swept sphere time-of-impact events
-    std::uint64_t ccdDynamicHits = 0;  // TOIs between two moving CCD spheres
+    std::uint64_t ccdHits = 0;         // all swept collider time-of-impact events
+    std::uint64_t ccdDynamicHits = 0;  // TOIs between two moving CCD bodies
     std::uint64_t ccdBudgetExhaustions = 0; // remaining time after event limit
     std::uint64_t ccdBoxFaceHits = 0;   // exact sphere/box face impacts
     std::uint64_t ccdBoxEdgeHits = 0;   // exact sphere/box cylindrical-edge impacts
@@ -77,8 +77,8 @@ struct SceneStats {
 // A small runtime object/component world rather than a data-oriented archetype
 // ECS. Supports parent-child transforms, renderers, lights and fixed-step
 // rigid-body motion with 3D spatial-grid broadphase, discrete sequential
-// contacts, and bounded event-driven sphere CCD; independent of
-// a GL context until Mesh::draw().
+// contacts, and bounded event-driven translation CCD for spheres/AABBs;
+// independent of a GL context until Mesh::draw().
 class Scene {
 public:
     static constexpr float fixedDeltaSeconds = 1.0f / 60.0f;
