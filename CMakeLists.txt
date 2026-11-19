@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.8.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.9.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -166,6 +166,9 @@ if(BUILD_TESTING)
     add_executable(engine2_scene_picking_tests tests/scene_picking_test.cpp)
     target_link_libraries(engine2_scene_picking_tests PRIVATE engine2_core)
     add_test(NAME scene-ray-picking-unit COMMAND engine2_scene_picking_tests)
+    add_executable(engine2_triangle_marquee_tests tests/triangle_marquee_test.cpp)
+    target_link_libraries(engine2_triangle_marquee_tests PRIVATE engine2_core)
+    add_test(NAME triangle-marquee-unit COMMAND engine2_triangle_marquee_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -361,6 +364,16 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(scene-ray-picking-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Real glTF triangular silhouette (false AABB hit) + rectangle
+        # group selection and additive union, compared on OpenGL PPM images.
+        add_test(NAME precise-triangle-marquee-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_triangle_marquee.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/triangle-picking-gap.gltf")
+        set_tests_properties(precise-triangle-marquee-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

@@ -142,8 +142,18 @@
 - [x] CLI --pick-screen / --pick-add / --gui-add и диагностика выбранных объектов
 - [x] CPU ray/selection tests и headless OpenGL image regression
 
-## v1.9 — улучшение физики и инструменты сцены (план)
-- [ ] Triangle-accurate / GPU ID-buffer picking, rectangle selection и общий pivot
+## v1.9 — точные треугольники и marquee editor (готово)
+- [x] Triangle-accurate ray picking после локального AABB broadphase
+- [x] CPU-копия позиций/индексов Mesh и корректный move/lifetime
+- [x] Двухсторонний Möller-Trumbore, ближайшая поверхность, rotated/scaled parent
+- [x] Переключение triangle/bounds в ImGui и --pick-geometry
+- [x] Drag-to-select из свободного viewport, Ctrl/Shift additive marquee
+- [x] Маркировка выбранной группы, стабильные generation handles, исключение дубликатов
+- [x] CLI --marquee-screen/--marquee-add и JSON glTF fixture с ложным AABB попаданием
+- [x] CPU triangle/rectangle math + headless GL image regression
+
+## v2.0 — производительность редактора и физика (план)
+- [ ] BVH для крупных мешей, alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
@@ -151,7 +161,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.0+ — крупные игровые системы (план)
+## v2.1+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

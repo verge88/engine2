@@ -8,6 +8,7 @@
 #include <glm/vec4.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace engine2 {
@@ -31,6 +32,11 @@ public:
 
     void draw() const;
     [[nodiscard]] const Bounds& bounds() const { return bounds_; }
+    // True triangle ray intersection in mesh-local coordinates, two sided.
+    // t uses the (possibly unnormalized) input direction's parameterization.
+    [[nodiscard]] std::optional<float> raycastLocal(
+        const glm::vec3& origin, const glm::vec3& direction,
+        float maximumDistance) const;
 
     [[nodiscard]] static Mesh sphere(unsigned int sectors = 48, unsigned int stacks = 32);
     [[nodiscard]] static Mesh plane();
@@ -44,6 +50,8 @@ private:
     GLuint ebo_ = 0;
     GLsizei indexCount_ = 0;
     Bounds bounds_{};
+    std::vector<glm::vec3> pickPositions_;
+    std::vector<std::uint32_t> pickIndices_;
 };
 
 } // namespace engine2
