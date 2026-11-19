@@ -138,6 +138,7 @@ std::string inspectScene(const Scene& scene, const SceneAssetRegistry& assets) {
                 {"staticFriction", body->staticFriction},
                 {"dynamicFriction", body->dynamicFriction},
                 {"isStatic", body->isStatic},
+                {"continuous", body->continuous},
                 {"velocity", vectorJson(body->velocity)}
             };
         }
@@ -215,6 +216,13 @@ std::size_t applySceneEdits(Scene& scene, std::string_view editsJson) {
             PointLight modified = *current;
             modified.intensity = numeric(change.at("intensity"), 0.0f, 1.0e6f);
             working.setPointLight(entity, modified);
+        } else if (op == "set-body-ccd") {
+            const RigidBodyComponent* current=working.rigidBodyComponent(entity);
+            if (!current)
+                throw std::invalid_argument("Scene edit target has no RigidBody");
+            RigidBodyComponent modified=*current;
+            modified.continuous=change.at("continuous").get<bool>();
+            working.setRigidBody(entity,modified);
         } else if (op == "set-body-friction") {
             const RigidBodyComponent* current = working.rigidBodyComponent(entity);
             if (!current)

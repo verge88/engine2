@@ -1,5 +1,7 @@
 #include "engine2/Scene.hpp"
 #include "engine2/ContactSolver.hpp"
+#include "engine2/PhysicsBroadphase.hpp"
+#include "engine2/ContinuousCollision.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -266,6 +268,9 @@ SceneStats Scene::stats() const {
     SceneStats result;
     result.fixedSteps = totalSteps_;
     result.broadphasePairs = broadphasePairs_;
+    result.broadphaseCells = broadphaseCells_;
+    result.broadphaseTests = broadphaseTests_;
+    result.ccdHits = ccdHits_;
     result.sphereContacts = sphereContacts_;
     result.boxContacts = boxContacts_;
     result.solverPasses = solverPasses_;
@@ -282,81 +287,129 @@ SceneStats Scene::stats() const {
 void Scene::fixedStep() {
     struct Candidate {
         std::uint32_t slot = 0;
+        glm::vec3 start{0.0f};
         glm::vec3 position{0.0f};
         glm::vec3 half{0.0f};
-        float minX = 0.0f;
-        float maxX = 0.0f;
     };
     std::vector<Candidate> candidates;
     candidates.reserve(slots_.size());
 
-    // Unparented translation-only dynamics; legacy friction defaults are
-    // zero. Static colliders participate in contacts, never integration.
-    for (std::size_t i = 0; i < slots_.size(); ++i) {
-        Slot& slot = slots_[i];
+    // Semi-implicit Euler at fixed 60 Hz. Static bodies never integrate.
+    // Remember both endpoints: swept broadphase must not discard fast spheres
+    // that cross a small obstacle entirely inside one fixed simulation step.
+    for (std::size_t i=0;i<slots_.size();++i) {
+        Slot& slot=slots_[i];
         if (!slot.alive || !slot.enabled || !slot.body) continue;
-        RigidBodyComponent& body = *slot.body;
-        const glm::vec3 half = colliderHalfExtents(
+        RigidBodyComponent& body=*slot.body;
+        const glm::vec3 half=colliderHalfExtents(
             {body.shape,body.radius,body.halfExtents});
-        glm::vec3 position(slot.local[3]);
+        const glm::vec3 start(slot.local[3]);
+        glm::vec3 position=start;
         if (!body.isStatic) {
-            if (body.gravity) body.velocity.y -= 9.81f * fixedDeltaSeconds;
-            position += body.velocity * fixedDeltaSeconds;
-            const float floor = body.groundHeight + half.y;
-            if (position.y < floor) {
-                position.y = floor;
+            if (body.gravity) body.velocity.y-=9.81f*fixedDeltaSeconds;
+            position+=body.velocity*fixedDeltaSeconds;
+            const float floor=body.groundHeight+half.y;
+            if (position.y<floor) {
+                position.y=floor;
                 solveFloorImpact(body.velocity,
                     {body.restitution,body.staticFriction,body.dynamicFriction});
             }
-            slot.local[3] = glm::vec4(position,1.0f);
+            slot.local[3]=glm::vec4(position,1.0f);
         }
-        candidates.push_back({
-            static_cast<std::uint32_t>(i),position,half,
-            position.x-half.x,position.x+half.x
-        });
+        candidates.push_back({static_cast<std::uint32_t>(i),start,position,half});
     }
 
-    // Sweep-and-prune in X, then Y/Z overlap. Collect all plausible pairs
-    // BEFORE iterative resolution. A small envelope accounts for positional
-    // corrections that make previously touching bodies overlap later.
-    std::sort(candidates.begin(),candidates.end(),
-        [](const Candidate& a,const Candidate& b) {
-            return a.minX!=b.minX ? a.minX<b.minX : a.slot<b.slot;
+    // True 3D broadphase: map the swept world-space bounds to 2m cells. A
+    // giant proxy uses fallback checks against all bodies rather than
+    // allocating an unbounded number of grid cells. Deduplicated pairs are
+    // sorted by stable candidate indices to preserve deterministic physics.
+    constexpr float margin=0.02f;
+    std::vector<PhysicsBroadphaseProxy> proxies;
+    proxies.reserve(candidates.size());
+    for (const Candidate& candidate : candidates) {
+        const RigidBodyComponent& body=*slots_[candidate.slot].body;
+        proxies.push_back({
+            glm::min(candidate.start,candidate.position)-candidate.half-glm::vec3(margin),
+            glm::max(candidate.start,candidate.position)+candidate.half+glm::vec3(margin),
+            body.isStatic
         });
+    }
+    const PhysicsBroadphaseResult broadphase=physicsGridBroadphase(proxies);
+    broadphasePairs_+=broadphase.pairs.size();
+    broadphaseCells_+=broadphase.occupiedCells;
+    broadphaseTests_+=broadphase.candidateTests;
+
+    // Optional, single-impact CCD for dynamic spheres vs static primitives.
+    // This occurs before the iterative discrete solver; a body's earliest
+    // impact is resolved first, then the residual portion of the fixed step
+    // is travelled with its new velocity. Dynamic/dynamic CCD and successive
+    // CCD impacts within one step are intentionally not yet implemented.
+    for (std::size_t i=0;i<candidates.size();++i) {
+        Candidate& moving=candidates[i];
+        RigidBodyComponent& body=*slots_[moving.slot].body;
+        if (body.isStatic || !body.continuous ||
+            body.shape!=ColliderShape::Sphere) continue;
+        std::optional<SweptSphereHit> earliest;
+        std::size_t obstacleIndex=0;
+        for (const auto& [first,second] : broadphase.pairs) {
+            const std::size_t other=first==i ? second :
+                                    second==i ? first : candidates.size();
+            if (other==candidates.size()) continue;
+            const Candidate& obstacle=candidates[other];
+            const RigidBodyComponent& fixed=*slots_[obstacle.slot].body;
+            if (!fixed.isStatic) continue;
+            const auto hit=sweepSphereStatic(
+                moving.start,moving.position,body.radius,
+                {fixed.shape,fixed.radius,fixed.halfExtents},
+                obstacle.position);
+            if (hit && (!earliest || hit->fraction<earliest->fraction)) {
+                earliest=hit;
+                obstacleIndex=other;
+            }
+        }
+        if (!earliest) continue;
+        const RigidBodyComponent& fixed=*slots_[candidates[obstacleIndex].slot].body;
+        const glm::vec3 displacement=moving.position-moving.start;
+        moving.position=moving.start+displacement*earliest->fraction
+                        -earliest->normal*0.0002f;
+        glm::vec3 velocityA=body.velocity;
+        glm::vec3 stationaryVelocity(0.0f);
+        ContactImpulseState impulse;
+        solveContactImpulse(
+            velocityA,stationaryVelocity,1.0f/body.mass,0.0f,
+            earliest->normal,
+            {body.restitution,body.staticFriction,body.dynamicFriction},
+            {fixed.restitution,fixed.staticFriction,fixed.dynamicFriction},
+            impulse);
+        body.velocity=velocityA;
+        moving.position+=body.velocity*(
+            (1.0f-earliest->fraction)*fixedDeltaSeconds);
+        const float floor=body.groundHeight+moving.half.y;
+        if (moving.position.y<floor) {
+            moving.position.y=floor;
+            solveFloorImpact(body.velocity,
+                {0.0f,body.staticFriction,body.dynamicFriction});
+        }
+        ++ccdHits_;
+    }
 
     struct Constraint {
-        std::size_t first = 0;
-        std::size_t second = 0;
+        std::size_t first=0;
+        std::size_t second=0;
         ContactImpulseState impulse;
-        bool counted = false;
+        bool counted=false;
     };
     std::vector<Constraint> constraints;
-    constexpr float margin = 0.02f;
-    for (std::size_t i=0;i<candidates.size();++i) {
-        const Candidate& first=candidates[i];
-        for (std::size_t j=i+1;j<candidates.size();++j) {
-            const Candidate& second=candidates[j];
-            if (second.minX > first.maxX+margin) break;
-            const RigidBodyComponent& a=*slots_[first.slot].body;
-            const RigidBodyComponent& b=*slots_[second.slot].body;
-            if (a.isStatic && b.isStatic) continue;
-            ++broadphasePairs_;
-            const glm::vec3 delta=second.position-first.position;
-            if (std::abs(delta.y) > first.half.y+second.half.y+margin ||
-                std::abs(delta.z) > first.half.z+second.half.z+margin)
-                continue;
-            constraints.push_back({i,j,{},false});
-        }
-    }
+    constraints.reserve(broadphase.pairs.size());
+    for (const auto& [first,second] : broadphase.pairs)
+        constraints.push_back({first,second,{},false});
 
-    // Sequential impulses communicate support forces through chains of
-    // contacts (e.g. three stacked boxes), rather than resolving each pair
-    // once. Each constraint caches accumulated normal/tangent impulses for
-    // this fixed step; restitution is a persistent target, not reapplied
-    // independently in every solver pass.
-    constexpr int iterations = 8;
-    constexpr float positionSlop = 0.0001f;
-    constexpr float positionFactor = 0.8f;
+    // Sequential impulses communicate forces through chains of contacts.
+    // Normal and tangent impulses are cached for all eight passes, so bounce
+    // and Coulomb friction are not spuriously re-applied on each pass.
+    constexpr int iterations=8;
+    constexpr float positionSlop=0.0001f;
+    constexpr float positionFactor=0.8f;
     for (int pass=0;pass<iterations;++pass) {
         for (Constraint& c : constraints) {
             Candidate& first=candidates[c.first];
@@ -387,20 +440,17 @@ void Scene::fixedStep() {
             if (!a.isStatic) a.velocity=velocityA;
             if (!b.isStatic) b.velocity=velocityB;
 
-            const float overlap=std::max(
-                contact.penetration-positionSlop,0.0f);
+            const float overlap=std::max(contact.penetration-positionSlop,0.0f);
             const float correction=positionFactor*overlap/total;
             first.position-=contact.normal*(correction*invA);
             second.position+=contact.normal*(correction*invB);
         }
 
-        // Floor also supports contact chains: a box pushed downward by
-        // another box is projected out after each Gauss-Seidel iteration.
         for (Candidate& candidate : candidates) {
             RigidBodyComponent& body=*slots_[candidate.slot].body;
             if (body.isStatic) continue;
             const float floor=body.groundHeight+candidate.half.y;
-            if (candidate.position.y < floor) {
+            if (candidate.position.y<floor) {
                 candidate.position.y=floor;
                 solveFloorImpact(body.velocity,
                     {0.0f,body.staticFriction,body.dynamicFriction});
@@ -412,7 +462,7 @@ void Scene::fixedStep() {
         if (!slot.body->isStatic)
             slot.local[3]=glm::vec4(candidate.position,1.0f);
     }
-    solverPasses_ += iterations;
+    solverPasses_+=iterations;
     ++totalSteps_;
 }
 

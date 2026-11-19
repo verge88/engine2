@@ -154,6 +154,7 @@ Json writeBody(const RigidBodyComponent& body) {
         {"dynamicFriction", finiteValue(body.dynamicFriction)},
         {"mass", finiteValue(body.mass)},
         {"isStatic", body.isStatic},
+        {"continuous", body.continuous},
         {"shape", body.shape == ColliderShape::Box ? "BOX" : "SPHERE"},
         {"halfExtents", writeVec3(body.halfExtents)}
     };
@@ -173,6 +174,9 @@ RigidBodyComponent readBody(const Json& data) {
         result.dynamicFriction = finiteFloat(data.at("dynamicFriction"));
     result.mass = finiteFloat(data.at("mass"));
     result.isStatic = data.at("isStatic").get<bool>();
+    // Older v1 scene JSON has no CCD flag: preserve discrete response.
+    if (data.contains("continuous"))
+        result.continuous = data.at("continuous").get<bool>();
     // Backward compatibility: v1 scenes saved by engine2 v1.2 do not have
     // shape/halfExtents. A missing shape is a sphere, as before.
     if (data.contains("shape")) {
