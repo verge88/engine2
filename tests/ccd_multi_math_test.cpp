@@ -64,5 +64,10 @@ int main() {
         {1,0,0},{0.1f,0,0},0.1f);
     check(touching && close(touching->fraction,1.0f),
           "Touching sphere surfaces at end of sweep must count");
+    // The tolerance must not turn a real after-step hit into an event.
+    const auto afterEnd=sweepSphereMoving(
+        {-1,0,0},{-0.1001f,0,0},0.1f,
+        {1,0,0},{0.1001f,0,0},0.1f);
+    check(!afterEnd,"CCD must reject contact after the fixed-step interval");
     return 0;
 }

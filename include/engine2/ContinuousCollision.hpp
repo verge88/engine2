@@ -104,12 +104,17 @@ inline std::optional<SweptSphereHit> sweepSphereMoving(
     if (!(discriminant>=0.0f) || !std::isfinite(discriminant))
         return std::nullopt;
     const float time=(-b-std::sqrt(discriminant))/lengthSquared;
-    if (time<0.0f || time>1.0f) return std::nullopt;
-    const glm::vec3 difference=separation+relative*time;
+    // Quadratic roots can round a true end-of-step touch to 1+1ULP.
+    // Accept only a tiny tolerance and clamp it back into the interval.
+    constexpr float timeTolerance=1.0e-6f;
+    if (time < -timeTolerance || time > 1.0f+timeTolerance)
+        return std::nullopt;
+    const float fraction=glm::clamp(time,0.0f,1.0f);
+    const glm::vec3 difference=separation+relative*fraction;
     const float distance=glm::length(difference);
     if (!(distance>1.0e-7f) || !std::isfinite(distance))
         return std::nullopt;
-    return SweptSphereHit{time,difference/distance};
+    return SweptSphereHit{fraction,difference/distance};
 }
 
 } // namespace engine2
