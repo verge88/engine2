@@ -193,4 +193,108 @@ inline std::optional<SweptSphereHit> sweepSphereMoving(
     return SweptSphereHit{fraction,difference/distance};
 }
 
+
+// Exact relative-motion sweep for two translation-only axis-aligned boxes.
+// The center of A is swept against B expanded by A's half extents. Normal
+// points from A toward B at the first touching slab.
+inline std::optional<SweptSphereHit> sweepBoxMoving(
+    glm::vec3 startA, glm::vec3 endA, glm::vec3 halfA,
+    glm::vec3 startB, glm::vec3 endB, glm::vec3 halfB) {
+    if (boxBoxContact(startA,halfA,startB,halfB).colliding)
+        return std::nullopt; // initial penetration belongs to discrete solver
+
+    const glm::dvec3 offset=glm::dvec3(startA)-glm::dvec3(startB);
+    const glm::dvec3 relative=
+        (glm::dvec3(endA)-glm::dvec3(startA))-
+        (glm::dvec3(endB)-glm::dvec3(startB));
+    const glm::dvec3 expanded=glm::dvec3(halfA)+glm::dvec3(halfB);
+    if (glm::dot(relative,relative)<1.0e-18)
+        return std::nullopt;
+
+    double enter=-std::numeric_limits<double>::infinity();
+    double exit=std::numeric_limits<double>::infinity();
+    int enterAxis=-1;
+    double enterSign=0.0;
+    constexpr double slabEpsilon=1.0e-12;
+
+    for (int axis=0;axis<3;++axis) {
+        if (std::abs(relative[axis])<1.0e-14) {
+            if (offset[axis] < -expanded[axis]-slabEpsilon ||
+                offset[axis] >  expanded[axis]+slabEpsilon)
+                return std::nullopt;
+            continue;
+        }
+
+        double nearTime;
+        double farTime;
+        double normalSign;
+        if (relative[axis]>0.0) {
+            nearTime=(-expanded[axis]-offset[axis])/relative[axis];
+            farTime=( expanded[axis]-offset[axis])/relative[axis];
+            normalSign=1.0;
+        } else {
+            nearTime=( expanded[axis]-offset[axis])/relative[axis];
+            farTime=(-expanded[axis]-offset[axis])/relative[axis];
+            normalSign=-1.0;
+        }
+
+        if (nearTime>enter) {
+            enter=nearTime;
+            enterAxis=axis;
+            enterSign=normalSign;
+        }
+        exit=std::min(exit,farTime);
+        if (enter>exit+slabEpsilon)
+            return std::nullopt;
+    }
+
+    constexpr double timeTolerance=1.0e-8;
+    if (enterAxis<0 || !std::isfinite(enter) ||
+        enter < -timeTolerance || enter > 1.0+timeTolerance ||
+        exit < -timeTolerance)
+        return std::nullopt;
+
+    glm::vec3 normal(0.0f);
+    normal[enterAxis]=static_cast<float>(enterSign);
+    if (glm::dot(relative,glm::dvec3(normal))<=1.0e-12)
+        return std::nullopt;
+    return SweptSphereHit{
+        static_cast<float>(std::clamp(enter,0.0,1.0)),
+        normal,SweptContactFeature::Face
+    };
+}
+
+// Generic translation-only CCD for the current collider set. Relative motion
+// makes moving sphere/box pairs identical to the exact rounded-box sweep from
+// v2.4; AABB/AABB uses the exact Minkowski-expanded slab sweep above.
+inline std::optional<SweptSphereHit> sweepColliderMoving(
+    glm::vec3 startA, glm::vec3 endA, const ColliderGeometry& a,
+    glm::vec3 startB, glm::vec3 endB, const ColliderGeometry& b) {
+    if (colliderContact(a,startA,b,startB).colliding)
+        return std::nullopt;
+
+    if (a.shape==ColliderShape::Sphere && b.shape==ColliderShape::Sphere)
+        return sweepSphereMoving(
+            startA,endA,a.radius,startB,endB,b.radius);
+
+    if (a.shape==ColliderShape::Sphere && b.shape==ColliderShape::Box) {
+        const glm::vec3 relativeEnd=
+            startA+(endA-startA)-(endB-startB);
+        return sweepSphereRoundedBox(
+            startA,relativeEnd,a.radius,startB,b.halfExtents);
+    }
+
+    if (a.shape==ColliderShape::Box && b.shape==ColliderShape::Sphere) {
+        const glm::vec3 relativeEnd=
+            startB+(endB-startB)-(endA-startA);
+        auto hit=sweepSphereRoundedBox(
+            startB,relativeEnd,b.radius,startA,a.halfExtents);
+        if (hit) hit->normal=-hit->normal;
+        return hit;
+    }
+
+    return sweepBoxMoving(
+        startA,endA,a.halfExtents,startB,endB,b.halfExtents);
+}
+
 } // namespace engine2
