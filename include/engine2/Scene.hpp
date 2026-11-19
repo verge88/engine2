@@ -44,7 +44,6 @@ struct MeshRendererComponent {
 // Static bodies have infinite mass and are moved by game/editor code.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
-    glm::vec3 angularVelocity{0.0f}; // radians/second; dynamic spheres only
     bool gravity = true;
     float radius = 0.5f;          // world-space approximate bounding sphere
     float groundHeight = -1.0f;  // world-space collision plane
@@ -56,6 +55,8 @@ struct RigidBodyComponent {
     bool continuous = false;     // opt-in translation CCD; moving peers also opt in
     ColliderShape shape = ColliderShape::Sphere;
     glm::vec3 halfExtents{0.5f}; // WORLD units, for AABB boxes only
+    // Kept at the end to preserve older positional aggregate initializers.
+    glm::vec3 angularVelocity{0.0f}; // radians/second; dynamic spheres only
 };
 
 struct SceneStats {
