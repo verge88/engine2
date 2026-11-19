@@ -29,6 +29,22 @@ bool finite(const glm::mat4& matrix) {
     return true;
 }
 
+float inverseAngularInertia(const RigidBodyComponent& body) {
+    if (body.isStatic || body.shape!=ColliderShape::Sphere) return 0.0f;
+    // Solid sphere around any axis: I = 2/5 m r^2.
+    return 2.5f/(body.mass*body.radius*body.radius);
+}
+
+glm::vec3 contactLeverArm(
+    const RigidBodyComponent& body, glm::vec3 position,
+    const RigidBodyComponent& other, glm::vec3 otherPosition,
+    glm::vec3 normal, bool firstBody) {
+    return colliderContactLeverArm(
+        {body.shape,body.radius,body.halfExtents},position,
+        {other.shape,other.radius,other.halfExtents},otherPosition,
+        normal,firstBody);
+}
+
 } // namespace
 
 Entity Scene::createEntity(std::string name) {
@@ -251,6 +267,17 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
     slot.body = body;
 }
 
+void Scene::setRigidBodyVelocity(Entity entity, glm::vec3 velocity) {
+    if (!finite(velocity))
+        throw std::invalid_argument("Rigid body velocity contains non-finite values");
+    Slot& slot=checked(entity);
+    if (!slot.body)
+        throw std::invalid_argument("Entity has no rigid body component");
+    if (slot.body->isStatic && glm::dot(velocity,velocity)>1.0e-12f)
+        throw std::invalid_argument("Static rigid bodies cannot have velocity");
+    slot.body->velocity=velocity;
+}
+
 const RigidBodyComponent& Scene::rigidBody(Entity entity) const {
     const Slot& slot = checked(entity);
     if (!slot.body)
@@ -343,7 +370,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+half.y;
             if (position.y<floor) {
                 position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {body.restitution,body.staticFriction,body.dynamicFriction});
             }
             slot.local[3]=glm::vec4(position,1.0f);
@@ -459,14 +489,28 @@ void Scene::fixedStep() {
             const float invTotal=invA+invB;
             glm::vec3 va=a.isStatic ? glm::vec3(0.0f) : a.velocity;
             glm::vec3 vb=b.isStatic ? glm::vec3(0.0f) : b.velocity;
+            glm::vec3 wa=a.isStatic ? glm::vec3(0.0f) : a.angularVelocity;
+            glm::vec3 wb=b.isStatic ? glm::vec3(0.0f) : b.angularVelocity;
             ContactImpulseState impulse;
-            solveContactImpulse(
-                va,vb,invA,invB,earliest->normal,
+            solveContactImpulseAngular(
+                va,wa,vb,wb,invA,invB,
+                inverseAngularInertia(a),inverseAngularInertia(b),
+                contactLeverArm(
+                    a,first.position,b,second.position,earliest->normal,true),
+                contactLeverArm(
+                    b,second.position,a,first.position,earliest->normal,false),
+                earliest->normal,
                 {a.restitution,a.staticFriction,a.dynamicFriction},
                 {b.restitution,b.staticFriction,b.dynamicFriction},
                 impulse);
-            if (!a.isStatic) a.velocity=va;
-            if (!b.isStatic) b.velocity=vb;
+            if (!a.isStatic) {
+                a.velocity=va;
+                a.angularVelocity=wa;
+            }
+            if (!b.isStatic) {
+                b.velocity=vb;
+                b.angularVelocity=wb;
+            }
             // Stay just outside the just-hit surface to avoid re-detecting
             // the same event at fraction zero after a velocity reversal.
             if (invTotal>0.0f) {
@@ -501,7 +545,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+actor.half.y;
             if (actor.position.y<floor) {
                 actor.position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }
@@ -571,29 +618,53 @@ void Scene::fixedStep() {
             if (total<=0.0f) continue;
             glm::vec3 velocityA=a.isStatic ? glm::vec3(0.0f) : a.velocity;
             glm::vec3 velocityB=b.isStatic ? glm::vec3(0.0f) : b.velocity;
+            glm::vec3 angularA=a.isStatic
+                ? glm::vec3(0.0f) : a.angularVelocity;
+            glm::vec3 angularB=b.isStatic
+                ? glm::vec3(0.0f) : b.angularVelocity;
+            const float invInertiaA=inverseAngularInertia(a);
+            const float invInertiaB=inverseAngularInertia(b);
+            const glm::vec3 leverA=contactLeverArm(
+                a,first.position,b,second.position,contact.normal,true);
+            const glm::vec3 leverB=contactLeverArm(
+                b,second.position,a,first.position,contact.normal,false);
 
             if (pass==0 && c.hasCached &&
                 glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment) {
-                const float closing=glm::dot(velocityB-velocityA,contact.normal);
+                const glm::vec3 pointA=contactPointVelocity(
+                    velocityA,angularA,leverA);
+                const glm::vec3 pointB=contactPointVelocity(
+                    velocityB,angularB,leverB);
+                const float closing=glm::dot(pointB-pointA,contact.normal);
                 if (closing>=-0.5f) {
                     c.impulse.accumulatedNormal=c.cached.normalImpulse;
                     c.impulse.accumulatedTangent=c.cached.tangentImpulse;
                     c.impulse.reboundTarget=0.0f;
                     c.impulse.initialized=true;
                     c.impulse.persistentEligible=true;
-                    warmStartContactImpulse(
-                        velocityA,velocityB,invA,invB,contact.normal,c.impulse);
+                    warmStartContactImpulseAngular(
+                        velocityA,angularA,velocityB,angularB,
+                        invA,invB,invInertiaA,invInertiaB,
+                        leverA,leverB,contact.normal,c.impulse);
                     ++contactWarmStarts_;
                 }
             }
 
-            solveContactImpulse(
-                velocityA,velocityB,invA,invB,contact.normal,
+            solveContactImpulseAngular(
+                velocityA,angularA,velocityB,angularB,
+                invA,invB,invInertiaA,invInertiaB,
+                leverA,leverB,contact.normal,
                 {a.restitution,a.staticFriction,a.dynamicFriction},
                 {b.restitution,b.staticFriction,b.dynamicFriction},
                 c.impulse);
-            if (!a.isStatic) a.velocity=velocityA;
-            if (!b.isStatic) b.velocity=velocityB;
+            if (!a.isStatic) {
+                a.velocity=velocityA;
+                a.angularVelocity=angularA;
+            }
+            if (!b.isStatic) {
+                b.velocity=velocityB;
+                b.angularVelocity=angularB;
+            }
 
             const float overlap=std::max(contact.penetration-positionSlop,0.0f);
             const float correction=positionFactor*overlap/total;
@@ -607,7 +678,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+candidate.half.y;
             if (candidate.position.y<floor) {
                 candidate.position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }

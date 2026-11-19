@@ -115,6 +115,8 @@ public:
     void setRenderer(Entity entity, MeshRendererComponent component);
     void setPointLight(Entity entity, const PointLight& light);
     void setRigidBody(Entity entity, const RigidBodyComponent& body);
+    // Runtime velocity steering does not invalidate persistent contact caches.
+    void setRigidBodyVelocity(Entity entity, glm::vec3 velocity);
     [[nodiscard]] const RigidBodyComponent& rigidBody(Entity entity) const;
 
     [[nodiscard]] std::vector<RenderItem> renderItems() const;

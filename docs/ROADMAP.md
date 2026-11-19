@@ -209,7 +209,9 @@
 - [x] Persistent pair-contact cache и warm starting накопленных normal/tangent impulses между fixed steps
 - [ ] Multi-point contact manifolds и устойчивые длительные контакты для сложных/вращающихся тел
 - [x] Free-spin angular velocity/integration для динамических Sphere rigid bodies + JSON/editor support
-- [ ] Collision torque, moment of inertia, angular friction, joints и вращающиеся OBB
+- [x] Solid-sphere moment of inertia + friction torque для Sphere/Sphere, Sphere/AABB, CCD, warm-start и ground rolling
+- [x] Playable Orb Arena demo: player steering, collectibles, hazards, lives/restart, HUD title и headless smoke-test
+- [ ] Box inertia tensor, collision torque для вращающихся OBB и joints
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning

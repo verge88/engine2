@@ -97,4 +97,25 @@ inline Contact colliderContact(const ColliderGeometry& a, glm::vec3 positionA,
     return boxBoxContact(positionA, a.halfExtents, positionB, b.halfExtents);
 }
 
+// Lever arm from a spherical body's center to its physical contact point.
+inline glm::vec3 colliderContactLeverArm(
+    const ColliderGeometry& body, glm::vec3 position,
+    const ColliderGeometry& other, glm::vec3 otherPosition,
+    glm::vec3 normal, bool firstBody) {
+    if (body.shape != ColliderShape::Sphere) return glm::vec3(0.0f);
+
+    float direction = firstBody ? 1.0f : -1.0f;
+    if (other.shape == ColliderShape::Box) {
+        const glm::vec3 local = position - otherPosition;
+        const bool centerInside =
+            std::abs(local.x) <= other.halfExtents.x &&
+            std::abs(local.y) <= other.halfExtents.y &&
+            std::abs(local.z) <= other.halfExtents.z;
+        // sphereBoxContact uses a correction normal for containment. The
+        // nearest physical point on the sphere lies opposite that normal.
+        if (centerInside) direction = -direction;
+    }
+    return normal * (direction * body.radius);
+}
+
 } // namespace engine2
