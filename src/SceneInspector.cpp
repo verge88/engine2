@@ -139,7 +139,8 @@ std::string inspectScene(const Scene& scene, const SceneAssetRegistry& assets) {
                 {"dynamicFriction", body->dynamicFriction},
                 {"isStatic", body->isStatic},
                 {"continuous", body->continuous},
-                {"velocity", vectorJson(body->velocity)}
+                {"velocity", vectorJson(body->velocity)},
+                {"angularVelocity", vectorJson(body->angularVelocity)}
             };
         }
         document["entities"].push_back(std::move(record));
@@ -237,6 +238,14 @@ std::size_t applySceneEdits(Scene& scene, std::string_view editsJson) {
                 throw std::invalid_argument("Scene edit target has no RigidBody");
             RigidBodyComponent modified = *current;
             modified.velocity = vec3(change.at("velocity"), -1.0e5f, 1.0e5f);
+            working.setRigidBody(entity, modified);
+        } else if (op == "set-body-angular-velocity") {
+            const RigidBodyComponent* current = working.rigidBodyComponent(entity);
+            if (!current)
+                throw std::invalid_argument("Scene edit target has no RigidBody");
+            RigidBodyComponent modified = *current;
+            modified.angularVelocity =
+                vec3(change.at("angularVelocity"), -1000.0f, 1000.0f);
             working.setRigidBody(entity, modified);
         } else if (op == "delete") {
             working.destroyEntity(entity);

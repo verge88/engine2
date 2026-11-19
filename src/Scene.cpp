@@ -2,6 +2,7 @@
 #include "engine2/ContactSolver.hpp"
 #include "engine2/PhysicsBroadphase.hpp"
 #include "engine2/ContinuousCollision.hpp"
+#include "engine2/AngularDynamics.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -224,7 +225,8 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
     Slot& slot = checked(entity);
     if (slot.parent)
         throw std::invalid_argument("Rigid bodies must be root entities");
-    if (!finite(body.velocity) || !std::isfinite(body.radius) ||
+    if (!finite(body.velocity) || !finite(body.angularVelocity) ||
+        !std::isfinite(body.radius) ||
         !std::isfinite(body.groundHeight) || !std::isfinite(body.restitution) ||
         !std::isfinite(body.mass) || body.mass <= 0.0f ||
         !finite(body.halfExtents) ||
@@ -238,6 +240,13 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
         body.dynamicFriction < 0.0f ||
         body.dynamicFriction > body.staticFriction)
         throw std::invalid_argument("Invalid rigid body parameters");
+    const bool spinning=glm::dot(body.angularVelocity,body.angularVelocity)>1.0e-12f;
+    if (spinning && body.shape!=ColliderShape::Sphere)
+        throw std::invalid_argument(
+            "Angular velocity currently requires a spherical collider");
+    if (spinning && body.isStatic)
+        throw std::invalid_argument(
+            "Static rigid bodies cannot have angular velocity");
     invalidateContacts(entity.index);
     slot.body = body;
 }
@@ -326,6 +335,9 @@ void Scene::fixedStep() {
         const glm::vec3 start(slot.local[3]);
         glm::vec3 position=start;
         if (!body.isStatic) {
+            if (body.shape==ColliderShape::Sphere)
+                slot.local=integrateAngularVelocity(
+                    slot.local,body.angularVelocity,fixedDeltaSeconds);
             if (body.gravity) body.velocity.y-=9.81f*fixedDeltaSeconds;
             position+=body.velocity*fixedDeltaSeconds;
             const float floor=body.groundHeight+half.y;
