@@ -146,6 +146,7 @@ Material readMaterial(const Json& data, const SceneAssetRegistry& assets) {
 Json writeBody(const RigidBodyComponent& body) {
     return Json{
         {"velocity", writeVec3(body.velocity)},
+        {"angularVelocity", writeVec3(body.angularVelocity)},
         {"gravity", body.gravity},
         {"radius", finiteValue(body.radius)},
         {"groundHeight", finiteValue(body.groundHeight)},
@@ -163,6 +164,9 @@ Json writeBody(const RigidBodyComponent& body) {
 RigidBodyComponent readBody(const Json& data) {
     RigidBodyComponent result;
     result.velocity = readVec3(data.at("velocity"));
+    // Older v1 JSON predates angular dynamics; zero spin preserves behavior.
+    if (data.contains("angularVelocity"))
+        result.angularVelocity = readVec3(data.at("angularVelocity"));
     result.gravity = data.at("gravity").get<bool>();
     result.radius = finiteFloat(data.at("radius"));
     result.groundHeight = finiteFloat(data.at("groundHeight"));
