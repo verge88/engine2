@@ -25,6 +25,7 @@ struct ContactImpulseState {
     glm::vec3 accumulatedTangent{0.0f};
     float reboundTarget = 0.0f;
     bool initialized = false;
+    bool persistentEligible = false;
 };
 
 inline void warmStartContactImpulse(
@@ -57,6 +58,7 @@ inline void solveContactImpulse(
         const float restitution = std::min(
             materialA.restitution,materialB.restitution);
         state.reboundTarget = initial < -0.5f ? -initial * restitution : 0.0f;
+        state.persistentEligible = initial >= -0.5f;
         state.initialized = true;
     }
 
