@@ -74,6 +74,7 @@ struct Arguments {
     std::optional<std::filesystem::path> inspectScene;
     std::optional<bool> guiVisible;
     std::optional<std::size_t> guiSelection;
+    std::optional<bool> gizmoEnabled;
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
@@ -197,6 +198,11 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--gui requires 0 or 1");
             args.guiVisible = value != 0.0f;
+        } else if (arg == "--gizmo" && i + 1 < argc) {
+            const float value=parseSetting(argv[++i], "--gizmo", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--gizmo requires 0 or 1");
+            args.gizmoEnabled=value!=0.0f;
         } else if (arg == "--gui-select" && i + 1 < argc) {
             const std::string value(argv[++i]);
             std::size_t parsed = 0;
@@ -313,10 +319,10 @@ int run(int argc, char** argv) {
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
-                     "               [--gui 0|1] [--gui-select entity-index]\n"
+                     "               [--gui 0|1] [--gui-select entity-index] [--gizmo 0|1]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
-                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Tab cursor, Esc exit.\n";
+                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Ctrl+Z undo, Ctrl+Y redo, Tab cursor, Esc exit.\n";
         return 0;
     }
 
@@ -537,6 +543,7 @@ int run(int argc, char** argv) {
     // Initialize after the camera GLFW callbacks so ImGui can chain them.
     engine2::SceneGui gui(window);
     if (args.guiSelection) gui.selectIndex(world, *args.guiSelection);
+    gui.setGizmoEnabled(args.gizmoEnabled.value_or(true));
     gui.setVisible(args.guiVisible.value_or(!args.frames.has_value()));
     if (gui.visible() && !args.loadScene && !args.editScene) {
         // Initialize demo light entities now; they remain paused in edit mode.
@@ -638,7 +645,7 @@ int run(int argc, char** argv) {
         renderer.setPointLights(world.pointLights());
         renderer.render(camera, world.renderItems(), width, height, frameDelta);
         // Composite the GUI on the default back buffer BEFORE PPM capture.
-        gui.draw(world, assetRegistry);
+        gui.draw(world, assetRegistry, camera);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
             saveScreenshot(*args.screenshot, width, height);
@@ -665,7 +672,10 @@ int run(int argc, char** argv) {
                   << " meteredExposure=" << stats.meteredExposure
                   << " effectiveExposure=" << stats.effectiveExposure
                   << " bloomLevels=" << stats.bloomMipLevels
-                  << " guiVisible=" << (gui.visible() ? 1 : 0);
+                  << " guiVisible=" << (gui.visible() ? 1 : 0)
+                  << " gizmoEnabled=" << (gui.gizmoEnabled() ? 1 : 0)
+                  << " editorUndoCount=" << gui.undoCount()
+                  << " editorRedoCount=" << gui.redoCount();
         const auto sceneStats = world.stats();
         std::cout << " sceneEntities=" << sceneStats.entities
                   << " sceneRenderables=" << sceneStats.renderables

@@ -115,8 +115,17 @@
 - [x] F1, переключение захвата мыши, пауза камеры/физики при открытом GUI
 - [x] --gui 0|1 и --gui-select N, headless image-regression тесты ImGui
 
-## v1.6 — более полный редактор и физика (план)
-- [ ] Gizmo объектов, undo/redo и отдельный editor с asset browser
+## v1.6 — Undo/Redo и 3D-гизмо перемещения (готово)
+- [x] Bounded SceneHistory: снимки всех компонентов и generation-stamped entity handles
+- [x] Undo/Redo (кнопки, Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z), очистка Redo после новых изменений
+- [x] Transactional editor mutations: неуспешные операции не портят историю
+- [x] Группировка непрерывного перетаскивания в один шаг отмены
+- [x] 3D viewport gizmo: проекция мировых X/Y/Z осей, hit testing, screen-to-world drag
+- [x] Правильная конвертация мирового перемещения через inverse parent transform
+- [x] --gizmo 0|1, диагностические счётчики истории, CPU math/unit и headless image tests
+
+## v1.7 — редактор и физика (план)
+- [ ] Rotation/scale gizmos, grid snapping, viewport entity picking, asset browser
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
 - [ ] Asset-bundle/portable asset paths, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
@@ -124,7 +133,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v1.7+ — крупные игровые системы (план)
+## v1.8+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
