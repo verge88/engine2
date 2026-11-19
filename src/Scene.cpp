@@ -70,6 +70,12 @@ const std::string& Scene::name(Entity entity) const {
     return checked(entity).name;
 }
 
+void Scene::setName(Entity entity, std::string name) {
+    if (name.size() > 1024)
+        throw std::invalid_argument("Scene entity name exceeds 1024 bytes");
+    checked(entity).name = std::move(name);
+}
+
 Entity Scene::parent(Entity entity) const {
     return checked(entity).parent;
 }

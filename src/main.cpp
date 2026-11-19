@@ -4,6 +4,7 @@
 #include "engine2/Renderer.hpp"
 #include "engine2/Scene.hpp"
 #include "engine2/SceneIO.hpp"
+#include "engine2/SceneInspector.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -68,6 +69,8 @@ struct Arguments {
     std::optional<std::filesystem::path> screenshot;
     std::optional<std::filesystem::path> saveScene;
     std::optional<std::filesystem::path> loadScene;
+    std::optional<std::filesystem::path> editScene;
+    std::optional<std::filesystem::path> inspectScene;
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
@@ -186,6 +189,10 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.frustumCulling = value != 0.0f;
         } else if (arg == "--stats") {
             args.stats = true;
+        } else if (arg == "--edit-scene" && i + 1 < argc) {
+            args.editScene = std::filesystem::path(argv[++i]);
+        } else if (arg == "--inspect-scene" && i + 1 < argc) {
+            args.inspectScene = std::filesystem::path(argv[++i]);
         } else if (arg == "--save-scene" && i + 1 < argc) {
             args.saveScene = std::filesystem::path(argv[++i]);
         } else if (arg == "--load-scene" && i + 1 < argc) {
@@ -289,6 +296,7 @@ int run(int argc, char** argv) {
                      "               [--physics-demo 0|1] [--collision-demo 0|1] [--box-demo 0|1]\n"
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
+                     "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
@@ -486,6 +494,26 @@ int run(int argc, char** argv) {
         boxDemoEntities = handles;
     }
 
+    if (args.editScene) {
+        // Generated demo lights do not yet have PointLight components until
+        // the first frame. Initialize them before applying editor changes.
+        // Editing freezes demo light animation so that it cannot overwrite
+        // the user's explicit changes to position and intensity.
+        if (!args.loadScene) {
+            const auto lights = animatedLights(
+                args.pointLights, args.fixedLightTime.value_or(0.0f));
+            for (std::size_t i = 0; i < lightEntities.size(); ++i) {
+                world.setLocalTransform(lightEntities[i],
+                    glm::translate(glm::mat4(1.0f), lights[i].position));
+                engine2::PointLight light = lights[i];
+                light.position = glm::vec3(0.0f);
+                world.setPointLight(lightEntities[i], light);
+            }
+        }
+        const std::size_t count = engine2::applySceneEditsFile(world, *args.editScene);
+        std::cout << "Scene edits applied: " << count << '\n';
+    }
+
     double lastTime = glfwGetTime();
     bool previousTab = false;
     bool previousLess = false;
@@ -547,14 +575,16 @@ int run(int argc, char** argv) {
         glfwGetFramebufferSize(window, &width, &height);
         if (width == 0 || height == 0) continue;
 
-        const auto lights = animatedLights(
-            args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now)));
-        for (std::size_t i = 0; i < lightEntities.size(); ++i) {
-            world.setLocalTransform(lightEntities[i],
-                glm::translate(glm::mat4(1.0f), lights[i].position));
-            engine2::PointLight localLight = lights[i];
-            localLight.position = glm::vec3(0.0f);
-            world.setPointLight(lightEntities[i], localLight);
+        if (!args.editScene) {
+            const auto lights = animatedLights(
+                args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now)));
+            for (std::size_t i = 0; i < lightEntities.size(); ++i) {
+                world.setLocalTransform(lightEntities[i],
+                    glm::translate(glm::mat4(1.0f), lights[i].position));
+                engine2::PointLight localLight = lights[i];
+                localLight.position = glm::vec3(0.0f);
+                world.setPointLight(lightEntities[i], localLight);
+            }
         }
 
         // The render backend receives only extracted scene components.
@@ -596,10 +626,11 @@ int run(int argc, char** argv) {
                   << " sceneBroadphasePairs=" << sceneStats.broadphasePairs
                   << " sceneSphereContacts=" << sceneStats.sphereContacts
                   << " sceneBoxContacts=" << sceneStats.boxContacts;
-        if (fallingSphere) {
+        if (fallingSphere && world.contains(*fallingSphere)) {
             std::cout << " physicsY=" << world.worldTransform(*fallingSphere)[3][1];
         }
-        if (collisionBalls) {
+        if (collisionBalls && world.contains((*collisionBalls)[0]) &&
+            world.contains((*collisionBalls)[1])) {
             const auto& a = (*collisionBalls)[0];
             const auto& b = (*collisionBalls)[1];
             std::cout << " collisionSeparation="
@@ -608,7 +639,8 @@ int run(int argc, char** argv) {
                       << " collisionVelocityA=" << world.rigidBody(a).velocity.x
                       << " collisionVelocityB=" << world.rigidBody(b).velocity.x;
         }
-        if (boxDemoEntities) {
+        if (boxDemoEntities && world.contains((*boxDemoEntities)[0]) &&
+            world.contains((*boxDemoEntities)[1])) {
             const auto& obstacle = (*boxDemoEntities)[0];
             const auto& projectile = (*boxDemoEntities)[1];
             std::cout << " boxObstacleX=" << world.worldTransform(obstacle)[3][0]
@@ -621,6 +653,11 @@ int run(int argc, char** argv) {
     if (args.saveScene) {
         engine2::saveScene(world, assetRegistry, *args.saveScene);
         std::cout << "Scene saved: " << *args.saveScene
+                  << " entities=" << world.stats().entities << '\n';
+    }
+    if (args.inspectScene) {
+        engine2::saveSceneInspection(world, assetRegistry, *args.inspectScene);
+        std::cout << "Scene inspection saved: " << *args.inspectScene
                   << " entities=" << world.stats().entities << '\n';
     }
     return 0;
