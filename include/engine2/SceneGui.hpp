@@ -32,6 +32,13 @@ public:
     [[nodiscard]] bool visible() const { return visible_; }
     void selectIndex(const Scene& scene, std::size_t index);
     void addIndex(const Scene& scene, std::size_t index);
+    // AABB-only mode is retained for diagnostics; triangles is the default.
+    void setPrecisePicking(bool enabled) { precisePicking_ = enabled; }
+    [[nodiscard]] bool precisePicking() const { return precisePicking_; }
+    [[nodiscard]] std::size_t marqueeAt(
+        Scene& scene, const Camera& camera,
+        glm::vec2 from, glm::vec2 to, glm::vec2 viewport,
+        bool additive = false);
     [[nodiscard]] Entity pickAt(Scene& scene, const Camera& camera,
                                  glm::vec2 pixel, glm::vec2 viewport,
                                  bool additive = false);
@@ -72,6 +79,10 @@ private:
     Entity selected_{};
     SceneSelection selection_{};
     bool gizmoHovering_ = false;
+    bool precisePicking_ = true;
+    std::optional<glm::vec2> marqueeStart_;
+    glm::vec2 marqueeCurrent_{0.0f};
+    bool marqueeAdditive_ = false;
     struct DragTarget {
         Entity entity{};
         glm::mat4 local{1.0f};

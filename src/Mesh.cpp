@@ -1,4 +1,5 @@
 #include "engine2/Mesh.hpp"
+#include "engine2/TrianglePicking.hpp"
 
 #include <glm/gtc/constants.hpp>
 
@@ -27,6 +28,14 @@ Mesh::Mesh(std::vector<Vertex> vertices, std::vector<std::uint32_t> indices) {
         bounds_.max = glm::max(bounds_.max, vertex.position);
     }
 
+    if (indices.size() % 3 != 0)
+        throw std::invalid_argument("Mesh triangle indices must be divisible by three");
+    pickPositions_.reserve(vertices.size());
+    for (const Vertex& vertex : vertices) pickPositions_.push_back(vertex.position);
+    for (std::uint32_t index : indices)
+        if (index >= vertices.size())
+            throw std::invalid_argument("Mesh triangle index out of range");
+    pickIndices_ = indices;
     indexCount_ = static_cast<GLsizei>(indices.size());
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
@@ -66,7 +75,9 @@ Mesh::Mesh(Mesh&& other) noexcept
       vbo_(std::exchange(other.vbo_, 0)),
       ebo_(std::exchange(other.ebo_, 0)),
       indexCount_(std::exchange(other.indexCount_, 0)),
-      bounds_(other.bounds_) {}
+      bounds_(other.bounds_),
+      pickPositions_(std::move(other.pickPositions_)),
+      pickIndices_(std::move(other.pickIndices_)) {}
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept {
     if (this != &other) {
@@ -76,6 +87,8 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
         ebo_ = std::exchange(other.ebo_, 0);
         indexCount_ = std::exchange(other.indexCount_, 0);
         bounds_ = other.bounds_;
+        pickPositions_ = std::move(other.pickPositions_);
+        pickIndices_ = std::move(other.pickIndices_);
     }
     return *this;
 }
@@ -86,6 +99,13 @@ void Mesh::release() noexcept {
     if (vao_ != 0) glDeleteVertexArrays(1, &vao_);
     vao_ = vbo_ = ebo_ = 0;
     indexCount_ = 0;
+}
+
+std::optional<float> Mesh::raycastLocal(
+    const glm::vec3& origin, const glm::vec3& direction,
+    float maximumDistance) const {
+    return intersectPickTriangles(
+        pickPositions_, pickIndices_, origin, direction, maximumDistance);
 }
 
 void Mesh::draw() const {

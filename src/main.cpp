@@ -69,6 +69,12 @@ struct PickRequest {
     bool additive = false;
 };
 
+struct MarqueeRequest {
+    glm::vec2 from{0.0f};
+    glm::vec2 to{0.0f};
+    bool additive = false;
+};
+
 struct Arguments {
     std::optional<std::uint64_t> frames;
     std::optional<std::filesystem::path> model;
@@ -81,6 +87,8 @@ struct Arguments {
     std::optional<std::size_t> guiSelection;
     std::vector<std::size_t> guiAddIndices;
     std::vector<PickRequest> viewportPicks;
+    std::vector<MarqueeRequest> marquees;
+    bool precisePicking = true;
     std::optional<bool> gizmoEnabled;
     std::optional<engine2::GizmoMode> gizmoMode;
     std::optional<bool> gizmoSnap;
@@ -221,6 +229,20 @@ Arguments parseArgs(int argc, char** argv) {
             const float x=parseSetting(argv[++i],"--pick-screen X",0.0f,8192.0f);
             const float y=parseSetting(argv[++i],"--pick-screen Y",0.0f,8192.0f);
             args.viewportPicks.push_back({glm::vec2(x,y),additive});
+        } else if (arg == "--pick-geometry" && i + 1 < argc) {
+            const std::string mode(argv[++i]);
+            if (mode == "triangles") args.precisePicking = true;
+            else if (mode == "bounds") args.precisePicking = false;
+            else throw std::invalid_argument(
+                "--pick-geometry requires triangles or bounds");
+        } else if ((arg == "--marquee-screen" || arg == "--marquee-add") &&
+                   i + 4 < argc) {
+            const bool additive = arg == "--marquee-add";
+            const float x0 = parseSetting(argv[++i], "--marquee X0", 0.0f, 8192.0f);
+            const float y0 = parseSetting(argv[++i], "--marquee Y0", 0.0f, 8192.0f);
+            const float x1 = parseSetting(argv[++i], "--marquee X1", 0.0f, 8192.0f);
+            const float y1 = parseSetting(argv[++i], "--marquee Y1", 0.0f, 8192.0f);
+            args.marquees.push_back({{x0,y0},{x1,y1},additive});
         } else if (arg == "--gizmo" && i + 1 < argc) {
             const float value=parseSetting(argv[++i], "--gizmo", 0.0f, 1.0f);
             if (value != std::floor(value))
@@ -363,6 +385,8 @@ int run(int argc, char** argv) {
                      "               [--gizmo-mode move|rotate|scale] [--gizmo-snap 0|1]\n"
                      "               [--gizmo-grid 0.05..20]\n"
                      "               [--gui-add entity-index] [--pick-screen X Y] [--pick-add X Y]\n"
+                     "               [--pick-geometry triangles|bounds]\n"
+                     "               [--marquee-screen X0 Y0 X1 Y1] [--marquee-add X0 Y0 X1 Y1]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Ctrl+Z undo, Ctrl+Y redo, Tab cursor, Esc exit.\n";
@@ -587,6 +611,7 @@ int run(int argc, char** argv) {
     engine2::SceneGui gui(window);
     if (args.guiSelection) gui.selectIndex(world, *args.guiSelection);
     for (std::size_t index : args.guiAddIndices) gui.addIndex(world,index);
+    gui.setPrecisePicking(args.precisePicking);
     int pickWidth=0;
     int pickHeight=0;
     glfwGetWindowSize(window,&pickWidth,&pickHeight);
@@ -598,6 +623,15 @@ int run(int argc, char** argv) {
             request.additive);
         std::cout << "Scene ray pick: "
                   << (hit ? world.name(hit) : std::string("(none)"))
+                  << " selectedCount=" << gui.selectedCount() << '\n';
+    }
+    for (const MarqueeRequest& request : args.marquees) {
+        const std::size_t hits = gui.marqueeAt(
+            world,camera,request.from,request.to,
+            glm::vec2(static_cast<float>(pickWidth),
+                      static_cast<float>(pickHeight)),
+            request.additive);
+        std::cout << "Scene marquee: hits=" << hits
                   << " selectedCount=" << gui.selectedCount() << '\n';
     }
     gui.setGizmoEnabled(args.gizmoEnabled.value_or(true));
@@ -739,6 +773,7 @@ int run(int argc, char** argv) {
                   << " gizmoGrid=" << gui.gridStep()
                   << " editorUndoCount=" << gui.undoCount()
                   << " editorRedoCount=" << gui.redoCount()
+                  << " precisePicking=" << (gui.precisePicking() ? 1 : 0)
                   << " guiSelectedCount=" << gui.selectedCount()
                   << " guiSelectedIndex=" << (gui.selectedEntity()
                       ? static_cast<int>(gui.selectedEntity().index) : -1);

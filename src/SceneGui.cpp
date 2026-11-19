@@ -66,6 +66,7 @@ SceneGui::~SceneGui() {
 void SceneGui::setVisible(bool visible) {
     if (visible_ == visible) return;
     visible_ = visible;
+    marqueeStart_.reset();
     activeAxis_ = -1;
     activeAxisCheckpointed_ = false;
     glfwSetInputMode(window_, GLFW_CURSOR,
@@ -124,9 +125,28 @@ Entity SceneGui::pickAt(Scene& scene, const Camera& camera,
                          camera.viewMatrix();
     const auto ray = viewportPickRay(vp,pixel,viewport);
     if (!ray) throw std::invalid_argument("Scene picking pixel is outside viewport");
-    const auto hit = pickSceneBounds(scene,*ray);
+    const auto hit = precisePicking_ ? pickSceneTriangles(scene,*ray)
+                                     : pickSceneBounds(scene,*ray);
     select(scene,hit ? hit->entity : Entity{},additive);
     return hit ? hit->entity : Entity{};
+}
+
+std::size_t SceneGui::marqueeAt(
+    Scene& scene, const Camera& camera, glm::vec2 from,
+    glm::vec2 to, glm::vec2 viewport, bool additive) {
+    if (viewport.x<=0 || viewport.y<=0)
+        throw std::invalid_argument("Marquee viewport is invalid");
+    const glm::mat4 vp=camera.projectionMatrix(viewport.x/viewport.y) *
+                       camera.viewMatrix();
+    const auto hits=pickSceneRectangle(scene,vp,viewport,from,to);
+    selection_.selectMany(scene,hits,additive);
+    selected_=selection_.primary();
+    nameBuffer_.fill('\0');
+    if (scene.contains(selected_))
+        std::snprintf(nameBuffer_.data(),nameBuffer_.size(),
+                      "%s",scene.name(selected_).c_str());
+    activeAxis_=-1;
+    return hits.size();
 }
 
 void SceneGui::undo(Scene& scene) {
@@ -667,7 +687,9 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         ImGui::Text("Entities: %zu   Meshes: %zu   Lights: %zu   Bodies: %zu",
                     stats.entities,stats.renderables,stats.pointLights,
                     stats.rigidBodies);
-        ImGui::TextDisabled("Click mesh: select   Ctrl/Shift+click: toggle");
+        ImGui::TextDisabled("Click: select | Ctrl/Shift+click: toggle");
+        ImGui::TextDisabled("Drag empty viewport: rectangular selection");
+        ImGui::Checkbox("Precise triangle picking",&precisePicking_);
         ImGui::Text("Selected: %zu   Primary: %s",selection_.size(),
                     scene.contains(selected_) ? scene.name(selected_).c_str() : "(none)");
         ImGui::TextDisabled("F1: camera   Move / Rotate / Scale X,Y,Z");
@@ -737,8 +759,38 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         const glm::vec2 pixel(io.MousePos.x,io.MousePos.y);
         const glm::vec2 size(io.DisplaySize.x,io.DisplaySize.y);
         if (pixel.x>=0 && pixel.y>=0 &&
-            pixel.x<size.x && pixel.y<size.y)
-            (void)pickAt(scene,camera,pixel,size,io.KeyCtrl||io.KeyShift);
+            pixel.x<size.x && pixel.y<size.y) {
+            const Entity hit=pickAt(
+                scene,camera,pixel,size,io.KeyCtrl||io.KeyShift);
+            // Start marquee only from an unoccupied part of the viewport.
+            if (!hit) {
+                marqueeStart_=pixel;
+                marqueeCurrent_=pixel;
+                marqueeAdditive_=io.KeyCtrl||io.KeyShift;
+            }
+        }
+    }
+
+    if (marqueeStart_) {
+        marqueeCurrent_={io.MousePos.x,io.MousePos.y};
+        const glm::vec2 size(io.DisplaySize.x,io.DisplaySize.y);
+        marqueeCurrent_=glm::clamp(marqueeCurrent_,glm::vec2(0),
+                                  glm::max(size-glm::vec2(0.01f),glm::vec2(0)));
+        const glm::vec2 from=glm::min(*marqueeStart_,marqueeCurrent_);
+        const glm::vec2 to=glm::max(*marqueeStart_,marqueeCurrent_);
+        if (glm::length(marqueeCurrent_-*marqueeStart_)>=6.0f) {
+            ImDrawList* layer=ImGui::GetForegroundDrawList();
+            layer->AddRectFilled(ImVec2(from.x,from.y),ImVec2(to.x,to.y),
+                                 IM_COL32(90,162,234,35));
+            layer->AddRect(ImVec2(from.x,from.y),ImVec2(to.x,to.y),
+                           IM_COL32(90,178,255,220),0.0f,0,1.5f);
+        }
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            if (glm::length(marqueeCurrent_-*marqueeStart_)>=6.0f)
+                (void)marqueeAt(scene,camera,*marqueeStart_,
+                                marqueeCurrent_,size,marqueeAdditive_);
+            marqueeStart_.reset();
+        }
     }
     drawSelectionOutlines(scene,camera);
     ImGui::Render();
