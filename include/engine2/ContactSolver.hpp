@@ -185,31 +185,51 @@ inline void solveContactImpulse(
         materialA,materialB,state);
 }
 
-// A ground plane is an infinite-mass static collider. This helper resolves
-// one downward impact including a Coulomb friction impulse on the XZ plane.
+// A ground plane is an infinite-mass static collider. For a sphere the
+// tangential floor impulse also changes spin through the solid-sphere inertia.
 // Caller performs positional clamping to groundHeight + collider half-height.
+inline void solveFloorImpactAngular(
+    glm::vec3& velocity, glm::vec3& angularVelocity,
+    float invMass, float invInertia, float sphereRadius,
+    const ContactMaterial& body) {
+
+    if (velocity.y >= 0.0f || invMass <= 0.0f) return;
+    const float impactSpeed=-velocity.y;
+    float rebound=impactSpeed*body.restitution;
+    if (rebound < 0.25f) rebound=0.0f;
+    velocity.y=rebound;
+    const float normalDeltaVelocity=impactSpeed+rebound;
+    const float normalImpulse=normalDeltaVelocity/invMass;
+
+    const glm::vec3 leverArm(0.0f,-sphereRadius,0.0f);
+    const glm::vec3 pointVelocity=
+        contactPointVelocity(velocity,angularVelocity,leverArm);
+    const glm::vec3 tangent(pointVelocity.x,0.0f,pointVelocity.z);
+    const float tangentSpeed=glm::length(tangent);
+    if (tangentSpeed < 1.0e-8f) return;
+
+    const float tangentInvMass=
+        invMass + invInertia*sphereRadius*sphereRadius;
+    if (tangentInvMass <= 0.0f) return;
+    glm::vec3 impulse=-tangent/tangentInvMass;
+    const float staticLimit=body.staticFriction*normalImpulse;
+    const float desiredMagnitude=glm::length(impulse);
+    if (desiredMagnitude > staticLimit) {
+        const float dynamicMagnitude=
+            body.dynamicFriction*normalImpulse;
+        impulse=-tangent*(dynamicMagnitude/tangentSpeed);
+    }
+
+    velocity += impulse*invMass;
+    angularVelocity +=
+        glm::cross(leverArm,impulse)*invInertia;
+}
+
 inline void solveFloorImpact(glm::vec3& velocity,
                              const ContactMaterial& body) {
-    if (velocity.y >= 0.0f) return;
-    const float impactSpeed = -velocity.y;
-    float rebound = impactSpeed * body.restitution;
-    if (rebound < 0.25f) rebound = 0.0f;
-    velocity.y = rebound;
-    const float normalDeltaVelocity = impactSpeed + rebound;
-
-    const float horizontalSpeed = std::sqrt(
-        velocity.x*velocity.x + velocity.z*velocity.z);
-    if (horizontalSpeed < 1.0e-8f) return;
-    if (horizontalSpeed <= body.staticFriction * normalDeltaVelocity) {
-        velocity.x = 0.0f;
-        velocity.z = 0.0f;
-        return;
-    }
-    const float retained = std::max(
-        horizontalSpeed - body.dynamicFriction * normalDeltaVelocity,0.0f);
-    const float ratio = retained / horizontalSpeed;
-    velocity.x *= ratio;
-    velocity.z *= ratio;
+    glm::vec3 angularVelocity(0.0f);
+    solveFloorImpactAngular(
+        velocity,angularVelocity,1.0f,0.0f,0.0f,body);
 }
 
 } // namespace engine2
