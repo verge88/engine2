@@ -80,6 +80,13 @@ public:
     void setEnabled(Entity entity, bool enabled);
     [[nodiscard]] bool enabled(Entity entity) const;
 
+    // Serialization and editor/inspector access, including disabled entities.
+    // Returned component pointers are invalidated if the Scene is mutated.
+    [[nodiscard]] std::vector<Entity> entities() const;
+    [[nodiscard]] const MeshRendererComponent* rendererComponent(Entity entity) const;
+    [[nodiscard]] const PointLight* pointLightComponent(Entity entity) const;
+    [[nodiscard]] const RigidBodyComponent* rigidBodyComponent(Entity entity) const;
+
     void setRenderer(Entity entity, MeshRendererComponent component);
     void setPointLight(Entity entity, const PointLight& light);
     void setRigidBody(Entity entity, const RigidBodyComponent& body);

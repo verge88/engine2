@@ -79,15 +79,25 @@
 - [x] Статистика потенциальных пар и подтверждённых контактов
 - [x] CLI collision demo, unit tests равных/разных масс и OpenGL image regression
 
-## v1.2 — расширение игровых систем (план)
-- [ ] 3D broadphase / capsule/box colliders, трение, итерационный решатель, CCD
-- [ ] Сохранение/загрузка Scene в JSON и инструмент инспектора сущностей
+## v1.2 — JSON-сериализация игровых сцен (готово)
+- [x] Versioned `engine2.scene` JSON v1: все живые сущности, local/world иерархия, enabled
+- [x] Сериализация компонента MeshRenderer, core-PBR материала и 5 texture references
+- [x] Сохранение локальных точечных светильников и текущих параметров/скоростей RigidBody
+- [x] Asset registry со стабильными ключами Mesh/Texture вместо указателей/GL IDs
+- [x] Двухпроходное восстановление связей родителей и проверка циклов/неизвестных ресурсов
+- [x] CLI --save-scene / --load-scene для процедурных и glTF (при повторной загрузке модели)
+- [x] Unit JSON/file roundtrip, invalid-schema/cycle tests и headless pixel regressions
+
+## v1.3 — игровая физика и инструменты (план)
+- [ ] 3D broadphase, capsule/box colliders, трение, итерационный решатель, CCD
+- [ ] Редактор/inspector Scene с сохранением и изменением компонентов
+- [ ] Asset-bundle или надёжные внешние asset paths, миграции версий JSON
 - [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
 - [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions, async exposure readback
 
-## v1.3+ — крупные игровые системы (план)
+## v1.4+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

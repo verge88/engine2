@@ -3,6 +3,7 @@
 #include "engine2/Mesh.hpp"
 #include "engine2/Renderer.hpp"
 #include "engine2/Scene.hpp"
+#include "engine2/SceneIO.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -65,6 +66,8 @@ struct Arguments {
     std::optional<std::uint64_t> frames;
     std::optional<std::filesystem::path> model;
     std::optional<std::filesystem::path> screenshot;
+    std::optional<std::filesystem::path> saveScene;
+    std::optional<std::filesystem::path> loadScene;
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
@@ -177,6 +180,10 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.frustumCulling = value != 0.0f;
         } else if (arg == "--stats") {
             args.stats = true;
+        } else if (arg == "--save-scene" && i + 1 < argc) {
+            args.saveScene = std::filesystem::path(argv[++i]);
+        } else if (arg == "--load-scene" && i + 1 < argc) {
+            args.loadScene = std::filesystem::path(argv[++i]);
         } else if (arg == "--screenshot" && i + 1 < argc) {
             args.screenshot = std::filesystem::path(argv[++i]);
         } else {
@@ -274,6 +281,7 @@ int run(int argc, char** argv) {
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
                      "               [--physics-demo 0|1] [--collision-demo 0|1] [--sim-dt 0..0.25]\n"
+                     "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
@@ -282,6 +290,8 @@ int run(int argc, char** argv) {
 
     if ((args.physicsDemo || args.collisionDemo) && args.model)
         throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
+    if (args.loadScene && (args.physicsDemo || args.collisionDemo))
+        throw std::invalid_argument("--load-scene cannot be combined with physics/collision demos");
 
     GlfwSession session;
     GLFWwindow* window = session.window();
@@ -313,34 +323,54 @@ int run(int argc, char** argv) {
     std::unique_ptr<engine2::Mesh> sphere;
     std::unique_ptr<engine2::Mesh> floor;
     std::vector<engine2::RenderItem> initialScene;
+    engine2::SceneAssetRegistry assetRegistry;
     if (args.model) {
         imported.emplace(engine2::loadGltf(*args.model));
         initialScene = imported->items;
-        if (initialScene.empty()) throw std::runtime_error("glTF scene has no renderable primitives");
+        if (initialScene.empty())
+            throw std::runtime_error("glTF scene has no renderable primitives");
+        // Stable references refer to resource *indices*, not GPU texture IDs
+        // or the current process's Mesh memory addresses.
+        for (std::size_t i = 0; i < imported->meshes.size(); ++i) {
+            assetRegistry.registerMesh("gltf/mesh/" + std::to_string(i),
+                                       imported->meshes[i].get());
+        }
+        for (std::size_t i = 0; i < imported->textures.size(); ++i) {
+            assetRegistry.registerTexture("gltf/texture/" + std::to_string(i),
+                                          imported->textures[i]->id());
+        }
     } else {
         sphere = std::make_unique<engine2::Mesh>(engine2::Mesh::sphere());
         floor = std::make_unique<engine2::Mesh>(engine2::Mesh::plane());
+        assetRegistry.registerMesh("procedural/sphere", sphere.get());
+        assetRegistry.registerMesh("procedural/floor", floor.get());
         initialScene = createScene(*sphere, *floor);
     }
 
-    // Runtime scene entities are the single source of render submissions.
-    // Render component pointers reference resources owned by imported or Mesh.
+    // A load replaces the default runtime Scene. The caller must preload the
+    // same procedural asset set, or --model with the same original glTF.
+    // The model/texture GPU owners remain alive while Scene uses their refs.
     engine2::Scene world;
-    for (std::size_t i = 0; i < initialScene.size(); ++i) {
-        const engine2::RenderItem& item = initialScene[i];
-        const engine2::Entity entity =
-            world.createEntity("Mesh " + std::to_string(i));
-        world.setLocalTransform(entity, item.model);
-        world.setRenderer(entity, {item.mesh, item.material});
-    }
-
-    // Lights are regular scene entities with a local position and light
-    // component; their world-space positions are evaluated by Scene.
     std::vector<engine2::Entity> lightEntities;
-    lightEntities.reserve(static_cast<std::size_t>(args.pointLights));
-    for (int i = 0; i < args.pointLights; ++i) {
-        lightEntities.push_back(
-            world.createEntity("Point Light " + std::to_string(i)));
+    if (args.loadScene) {
+        world = engine2::loadScene(*args.loadScene, assetRegistry);
+        std::cout << "Scene loaded: " << *args.loadScene
+                  << " entities=" << world.stats().entities << '\n';
+    } else {
+        for (std::size_t i = 0; i < initialScene.size(); ++i) {
+            const engine2::RenderItem& item = initialScene[i];
+            const engine2::Entity entity =
+                world.createEntity("Mesh " + std::to_string(i));
+            world.setLocalTransform(entity, item.model);
+            world.setRenderer(entity, {item.mesh, item.material});
+        }
+
+        // Lights are ordinary Scene entities, and are animated only for
+        // newly generated demo scenes. A loaded scene retains saved lights.
+        lightEntities.reserve(static_cast<std::size_t>(args.pointLights));
+        for (int i = 0; i < args.pointLights; ++i)
+            lightEntities.push_back(
+                world.createEntity("Point Light " + std::to_string(i)));
     }
 
     // Optional playground for the fixed-step gravity + ground collision.
@@ -524,6 +554,11 @@ int run(int argc, char** argv) {
                       << " collisionVelocityB=" << world.rigidBody(b).velocity.x;
         }
         std::cout << '\n';
+    }
+    if (args.saveScene) {
+        engine2::saveScene(world, assetRegistry, *args.saveScene);
+        std::cout << "Scene saved: " << *args.saveScene
+                  << " entities=" << world.stats().entities << '\n';
     }
     return 0;
 }
