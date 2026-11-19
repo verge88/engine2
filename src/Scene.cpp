@@ -3,6 +3,7 @@
 #include "engine2/PhysicsBroadphase.hpp"
 #include "engine2/ContinuousCollision.hpp"
 #include "engine2/AngularDynamics.hpp"
+#include "engine2/RigidBodyMath.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
@@ -29,13 +30,22 @@ bool finite(const glm::mat4& matrix) {
     return true;
 }
 
-float inverseAngularInertia(const RigidBodyComponent& body) {
+float inverseCcdAngularInertia(const RigidBodyComponent& body) {
     if (body.isStatic || body.shape!=ColliderShape::Sphere) return 0.0f;
-    // Solid sphere around any axis: I = 2/5 m r^2.
     return 2.5f/(body.mass*body.radius*body.radius);
 }
 
-glm::vec3 contactLeverArm(
+glm::mat3 inverseAngularInertia(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    if (body.isStatic) return glm::mat3(0.0f);
+    // Continuous boxes preserve the existing translation-only CCD contract.
+    if (body.shape==ColliderShape::Box && body.continuous)
+        return glm::mat3(0.0f);
+    return worldInverseInertia(
+        body.shape,body.mass,body.radius,body.halfExtents,rotation);
+}
+
+glm::vec3 ccdContactLeverArm(
     const RigidBodyComponent& body, glm::vec3 position,
     const RigidBodyComponent& other, glm::vec3 otherPosition,
     glm::vec3 normal, bool firstBody) {
@@ -43,6 +53,36 @@ glm::vec3 contactLeverArm(
         {body.shape,body.radius,body.halfExtents},position,
         {other.shape,other.radius,other.halfExtents},otherPosition,
         normal,firstBody);
+}
+
+glm::vec3 boxFloorLeverArm(
+    glm::vec3 position,const RigidBodyComponent& body,
+    const glm::mat3& rotation) {
+    if (body.shape==ColliderShape::Sphere)
+        return glm::vec3(0.0f,-body.radius,0.0f);
+    const OrientedBox box{position,rotation,body.halfExtents};
+    return orientedBoxFeatureSupport(box,glm::vec3(0,-1,0))-position;
+}
+
+float floorHalfHeight(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    if (body.shape==ColliderShape::Sphere) return body.radius;
+    return orientedBoxProjectedRadius(
+        {glm::vec3(0.0f),rotation,body.halfExtents},
+        glm::vec3(0,1,0));
+}
+
+bool ccdGeometrySupported(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    return body.shape==ColliderShape::Sphere || axisAlignedRotation(rotation);
+}
+
+ColliderGeometry ccdGeometry(
+    const RigidBodyComponent& body,const glm::mat3& rotation) {
+    ColliderGeometry result{body.shape,body.radius,body.halfExtents};
+    if (body.shape==ColliderShape::Box)
+        result.halfExtents=orientedBoxAabbHalf(body.halfExtents,rotation);
+    return result;
 }
 
 } // namespace
@@ -163,8 +203,14 @@ void Scene::setParent(Entity child, Entity newParent, bool keepWorld) {
 void Scene::setLocalTransform(Entity entity, const glm::mat4& matrix) {
     if (!finite(matrix))
         throw std::invalid_argument("Scene transform contains non-finite values");
+    Slot& slot=checked(entity);
+    if (slot.body && !slot.body->isStatic &&
+        slot.body->shape==ColliderShape::Box && slot.body->continuous &&
+        !axisAlignedRotation(rigidBodyRotation(matrix)))
+        throw std::invalid_argument(
+            "Continuous Box CCD requires an axis-aligned box transform");
     invalidateContacts(entity.index);
-    checked(entity).local = matrix;
+    slot.local = matrix;
 }
 
 const glm::mat4& Scene::localTransform(Entity entity) const {
@@ -257,12 +303,17 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
         body.dynamicFriction > body.staticFriction)
         throw std::invalid_argument("Invalid rigid body parameters");
     const bool spinning=glm::dot(body.angularVelocity,body.angularVelocity)>1.0e-12f;
-    if (spinning && body.shape!=ColliderShape::Sphere)
-        throw std::invalid_argument(
-            "Angular velocity currently requires a spherical collider");
     if (spinning && body.isStatic)
         throw std::invalid_argument(
             "Static rigid bodies cannot have angular velocity");
+    if (body.shape==ColliderShape::Box && body.continuous) {
+        if (spinning)
+            throw std::invalid_argument(
+                "Continuous Box CCD is translation-only; disable CCD before spinning");
+        if (!body.isStatic && !axisAlignedRotation(rigidBodyRotation(slot.local)))
+            throw std::invalid_argument(
+                "Continuous Box CCD requires an axis-aligned box transform");
+    }
     invalidateContacts(entity.index);
     slot.body = body;
 }
@@ -345,54 +396,68 @@ void Scene::fixedStep() {
         std::uint32_t slot = 0;
         glm::vec3 start{0.0f};
         glm::vec3 position{0.0f};
+        glm::vec3 startHalf{0.0f};
         glm::vec3 half{0.0f};
+        glm::mat3 rotation{1.0f};
     };
     std::vector<Candidate> candidates;
     candidates.reserve(slots_.size());
 
-    // Semi-implicit Euler at fixed 60 Hz. Static bodies never integrate.
-    // Remember both endpoints: swept broadphase must not discard fast spheres
-    // that cross a small obstacle entirely inside one fixed simulation step.
+    // Semi-implicit Euler at fixed 60 Hz. Angular velocity rotates both sphere
+    // visuals and discrete OBB colliders. Broadphase bounds include the box
+    // orientation at both ends of the step, so rotation cannot shrink the
+    // swept proxy to only one endpoint.
     for (std::size_t i=0;i<slots_.size();++i) {
         Slot& slot=slots_[i];
         if (!slot.alive || !slot.enabled || !slot.body) continue;
         RigidBodyComponent& body=*slot.body;
-        const glm::vec3 half=colliderHalfExtents(
-            {body.shape,body.radius,body.halfExtents});
-        const glm::vec3 start(slot.local[3]);
-        glm::vec3 position=start;
+        const glm::mat3 startRotation=rigidBodyRotation(slot.local);
+        const glm::vec3 startHalf=body.shape==ColliderShape::Sphere
+            ? glm::vec3(body.radius)
+            : orientedBoxAabbHalf(body.halfExtents,startRotation);
+        const glm::vec3 startPosition(slot.local[3]);
+        glm::vec3 position=startPosition;
+
         if (!body.isStatic) {
-            if (body.shape==ColliderShape::Sphere)
-                slot.local=integrateAngularVelocity(
-                    slot.local,body.angularVelocity,fixedDeltaSeconds);
+            slot.local=integrateAngularVelocity(
+                slot.local,body.angularVelocity,fixedDeltaSeconds);
+            const glm::mat3 rotation=rigidBodyRotation(slot.local);
             if (body.gravity) body.velocity.y-=9.81f*fixedDeltaSeconds;
             position+=body.velocity*fixedDeltaSeconds;
-            const float floor=body.groundHeight+half.y;
+
+            const float floor=
+                body.groundHeight+floorHalfHeight(body,rotation);
             if (position.y<floor) {
                 position.y=floor;
-                solveFloorImpactAngular(
+                solveFloorImpactTensor(
                     body.velocity,body.angularVelocity,
-                    1.0f/body.mass,inverseAngularInertia(body),
-                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
+                    1.0f/body.mass,inverseAngularInertia(body,rotation),
+                    boxFloorLeverArm(position,body,rotation),
                     {body.restitution,body.staticFriction,body.dynamicFriction});
             }
             slot.local[3]=glm::vec4(position,1.0f);
         }
-        candidates.push_back({static_cast<std::uint32_t>(i),start,position,half});
+
+        const glm::mat3 rotation=rigidBodyRotation(slot.local);
+        const glm::vec3 half=body.shape==ColliderShape::Sphere
+            ? glm::vec3(body.radius)
+            : orientedBoxAabbHalf(body.halfExtents,rotation);
+        candidates.push_back({
+            static_cast<std::uint32_t>(i),
+            startPosition,position,startHalf,half,rotation
+        });
     }
 
-    // True 3D broadphase: map the swept world-space bounds to 2m cells. A
-    // giant proxy uses fallback checks against all bodies rather than
-    // allocating an unbounded number of grid cells. Deduplicated pairs are
-    // sorted by stable candidate indices to preserve deterministic physics.
     constexpr float margin=0.02f;
     std::vector<PhysicsBroadphaseProxy> proxies;
     proxies.reserve(candidates.size());
     for (const Candidate& candidate : candidates) {
         const RigidBodyComponent& body=*slots_[candidate.slot].body;
         proxies.push_back({
-            glm::min(candidate.start,candidate.position)-candidate.half-glm::vec3(margin),
-            glm::max(candidate.start,candidate.position)+candidate.half+glm::vec3(margin),
+            glm::min(candidate.start-candidate.startHalf,
+                     candidate.position-candidate.half)-glm::vec3(margin),
+            glm::max(candidate.start+candidate.startHalf,
+                     candidate.position+candidate.half)+glm::vec3(margin),
             body.isStatic
         });
     }
@@ -401,21 +466,23 @@ void Scene::fixedStep() {
     broadphaseCells_+=broadphase.occupiedCells;
     broadphaseTests_+=broadphase.candidateTests;
 
-    // Event-driven continuous collision detection. Opt-in dynamic spheres
-    // and translation-only AABBs advance on the same CCD timeline. Targets
-    // are static sphere/AABBs or another opt-in moving collider. Rebuild swept
-    // 3D pairs after EVERY impact, because bouncing can send a body towards a
-    // wall entirely outside its original swept AABB.
+    // CCD retains the v2.5 translation-only contract for boxes. Signed
+    // axis-aligned box rotations (including 90-degree extent permutations)
+    // are exact after converting body-local half extents to world AABB half.
+    // Arbitrarily rotated static OBBs are intentionally skipped by CCD and
+    // still participate in the discrete OBB solver below.
     std::vector<std::size_t> ccdActors;
     std::vector<std::size_t> ccdObjects;
     for (std::size_t i=0;i<candidates.size();++i) {
         const RigidBodyComponent& body=*slots_[candidates[i].slot].body;
-        const bool actor=!body.isStatic && body.continuous;
+        const bool supported=ccdGeometrySupported(body,candidates[i].rotation);
+        const bool actor=!body.isStatic && body.continuous && supported;
         if (actor) {
             ccdActors.push_back(i);
             candidates[i].position=candidates[i].start;
         }
-        if (actor || body.isStatic) ccdObjects.push_back(i);
+        if (supported && (actor || body.isStatic))
+            ccdObjects.push_back(i);
     }
 
     if (!ccdActors.empty()) {
@@ -457,11 +524,8 @@ void Scene::fixedStep() {
                 const glm::vec3 endB=second.position+
                     (b.isStatic ? glm::vec3(0.0f) : b.velocity*remaining);
                 const std::optional<SweptSphereHit> hit=sweepColliderMoving(
-                    first.position,endA,
-                    {a.shape,a.radius,a.halfExtents},
-                    second.position,endB,
-                    {b.shape,b.radius,b.halfExtents});
-                // Grid pairs are sorted, so exact-time ties use stable order.
+                    first.position,endA,ccdGeometry(a,first.rotation),
+                    second.position,endB,ccdGeometry(b,second.rotation));
                 if (hit && (!earliest ||
                             hit->fraction<earliest->fraction-1.0e-6f)) {
                     earliest=hit;
@@ -494,10 +558,10 @@ void Scene::fixedStep() {
             ContactImpulseState impulse;
             solveContactImpulseAngular(
                 va,wa,vb,wb,invA,invB,
-                inverseAngularInertia(a),inverseAngularInertia(b),
-                contactLeverArm(
+                inverseCcdAngularInertia(a),inverseCcdAngularInertia(b),
+                ccdContactLeverArm(
                     a,first.position,b,second.position,earliest->normal,true),
-                contactLeverArm(
+                ccdContactLeverArm(
                     b,second.position,a,first.position,earliest->normal,false),
                 earliest->normal,
                 {a.restitution,a.staticFriction,a.dynamicFriction},
@@ -511,8 +575,6 @@ void Scene::fixedStep() {
                 b.velocity=vb;
                 b.angularVelocity=wb;
             }
-            // Stay just outside the just-hit surface to avoid re-detecting
-            // the same event at fraction zero after a velocity reversal.
             if (invTotal>0.0f) {
                 first.position-=earliest->normal*
                     (separationEpsilon*invA/invTotal);
@@ -528,9 +590,6 @@ void Scene::fixedStep() {
                 case SweptContactFeature::Sphere: break;
             }
         }
-        // Bound the time spent in a pathological corridor of tiny contacts.
-        // Unsimulated remainder falls back to discrete resolution and is
-        // surfaced via telemetry, not silently frozen.
         if (remaining>1.0e-8f) {
             ++ccdBudgetExhaustions_;
             for (std::size_t index:ccdActors) {
@@ -542,13 +601,14 @@ void Scene::fixedStep() {
         for (std::size_t index:ccdActors) {
             Candidate& actor=candidates[index];
             RigidBodyComponent& body=*slots_[actor.slot].body;
-            const float floor=body.groundHeight+actor.half.y;
+            const float floor=
+                body.groundHeight+floorHalfHeight(body,actor.rotation);
             if (actor.position.y<floor) {
                 actor.position.y=floor;
-                solveFloorImpactAngular(
+                solveFloorImpactTensor(
                     body.velocity,body.angularVelocity,
-                    1.0f/body.mass,inverseAngularInertia(body),
-                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
+                    1.0f/body.mass,inverseAngularInertia(body,actor.rotation),
+                    boxFloorLeverArm(actor.position,body,actor.rotation),
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }
@@ -561,6 +621,7 @@ void Scene::fixedStep() {
         ContactImpulseState impulse;
         PersistentContactState cached;
         glm::vec3 normal{1.0f,0.0f,0.0f};
+        glm::vec3 point{0.0f};
         bool hasCached=false;
         bool counted=false;
     };
@@ -586,32 +647,30 @@ void Scene::fixedStep() {
         constraints.push_back(constraint);
     }
 
-    // Sequential impulses communicate forces through chains of contacts.
-    // Resting constraints can reuse the previous fixed step's accumulated
-    // normal/tangent impulses before the eight Gauss-Seidel passes. A cached
-    // contact is rejected if its normal changed or a fresh high-speed impact
-    // needs restitution instead of resting-contact warm starting.
     constexpr int iterations=8;
     constexpr float positionSlop=0.0001f;
     constexpr float positionFactor=0.8f;
     constexpr float warmNormalAlignment=0.98f;
+    constexpr float warmPointDistance=0.25f;
     for (int pass=0;pass<iterations;++pass) {
         for (Constraint& c : constraints) {
             Candidate& first=candidates[c.first];
             Candidate& second=candidates[c.second];
             RigidBodyComponent& a=*slots_[first.slot].body;
             RigidBodyComponent& b=*slots_[second.slot].body;
-            const Contact contact=colliderContact(
-                {a.shape,a.radius,a.halfExtents},first.position,
-                {b.shape,b.radius,b.halfExtents},second.position);
+            const Contact contact=colliderContactOriented(
+                {a.shape,a.radius,a.halfExtents},first.position,first.rotation,
+                {b.shape,b.radius,b.halfExtents},second.position,second.rotation);
             if (!contact.colliding) continue;
             c.normal=contact.normal;
+            c.point=contact.point;
             if (!c.counted) {
                 if (a.shape==ColliderShape::Sphere &&
                     b.shape==ColliderShape::Sphere) ++sphereContacts_;
                 else ++boxContacts_;
                 c.counted=true;
             }
+
             const float invA=a.isStatic ? 0.0f : 1.0f/a.mass;
             const float invB=b.isStatic ? 0.0f : 1.0f/b.mass;
             const float total=invA+invB;
@@ -622,15 +681,16 @@ void Scene::fixedStep() {
                 ? glm::vec3(0.0f) : a.angularVelocity;
             glm::vec3 angularB=b.isStatic
                 ? glm::vec3(0.0f) : b.angularVelocity;
-            const float invInertiaA=inverseAngularInertia(a);
-            const float invInertiaB=inverseAngularInertia(b);
-            const glm::vec3 leverA=contactLeverArm(
-                a,first.position,b,second.position,contact.normal,true);
-            const glm::vec3 leverB=contactLeverArm(
-                b,second.position,a,first.position,contact.normal,false);
+            const glm::mat3 invInertiaA=
+                inverseAngularInertia(a,first.rotation);
+            const glm::mat3 invInertiaB=
+                inverseAngularInertia(b,second.rotation);
+            const glm::vec3 leverA=contact.point-first.position;
+            const glm::vec3 leverB=contact.point-second.position;
 
             if (pass==0 && c.hasCached &&
-                glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment) {
+                glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment &&
+                glm::length(c.cached.point-contact.point)<=warmPointDistance) {
                 const glm::vec3 pointA=contactPointVelocity(
                     velocityA,angularA,leverA);
                 const glm::vec3 pointB=contactPointVelocity(
@@ -642,7 +702,7 @@ void Scene::fixedStep() {
                     c.impulse.reboundTarget=0.0f;
                     c.impulse.initialized=true;
                     c.impulse.persistentEligible=true;
-                    warmStartContactImpulseAngular(
+                    warmStartContactImpulseTensor(
                         velocityA,angularA,velocityB,angularB,
                         invA,invB,invInertiaA,invInertiaB,
                         leverA,leverB,contact.normal,c.impulse);
@@ -650,7 +710,7 @@ void Scene::fixedStep() {
                 }
             }
 
-            solveContactImpulseAngular(
+            solveContactImpulseTensor(
                 velocityA,angularA,velocityB,angularB,
                 invA,invB,invInertiaA,invInertiaB,
                 leverA,leverB,contact.normal,
@@ -675,21 +735,20 @@ void Scene::fixedStep() {
         for (Candidate& candidate : candidates) {
             RigidBodyComponent& body=*slots_[candidate.slot].body;
             if (body.isStatic) continue;
-            const float floor=body.groundHeight+candidate.half.y;
+            const float floor=
+                body.groundHeight+floorHalfHeight(body,candidate.rotation);
             if (candidate.position.y<floor) {
                 candidate.position.y=floor;
-                solveFloorImpactAngular(
+                solveFloorImpactTensor(
                     body.velocity,body.angularVelocity,
-                    1.0f/body.mass,inverseAngularInertia(body),
-                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
+                    1.0f/body.mass,
+                    inverseAngularInertia(body,candidate.rotation),
+                    boxFloorLeverArm(candidate.position,body,candidate.rotation),
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }
     }
 
-    // Persist only resting contacts. Impacts with a restitution target are
-    // deliberately not cached, preventing a large bounce impulse from being
-    // replayed on the next fixed step. Entries not seen this step are pruned.
     for (const Constraint& c : constraints) {
         if (c.counted && c.impulse.initialized &&
             c.impulse.persistentEligible &&
@@ -698,6 +757,7 @@ void Scene::fixedStep() {
                 c.impulse.accumulatedNormal,
                 c.impulse.accumulatedTangent,
                 c.normal,
+                c.point,
                 totalSteps_
             };
         } else {

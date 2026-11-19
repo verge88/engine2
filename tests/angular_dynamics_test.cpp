@@ -96,16 +96,30 @@ int main() {
                 <1.0e-7f,
             "Legacy scene without angularVelocity did not default to zero");
 
-    // Rotating AABBs would visually diverge from their axis-aligned collider,
-    // so reject them until OBB support exists. Static bodies do not integrate.
+    // Discrete boxes now rotate with their OBB collider. Translation-only CCD
+    // boxes deliberately keep the old non-rotating contract.
     {
-        Scene invalid;
-        const Entity box=invalid.createEntity("box");
+        Scene valid;
+        const Entity box=valid.createEntity("discrete OBB");
         RigidBodyComponent spinningBox;
         spinningBox.shape=ColliderShape::Box;
+        spinningBox.gravity=false;
+        spinningBox.groundHeight=-100.0f;
+        spinningBox.angularVelocity={0,1,0};
+        valid.setRigidBody(box,spinningBox);
+        (void)valid.advance(Scene::fixedDeltaSeconds);
+        require(std::abs(valid.worldTransform(box)[0].z)>0.005f,
+                "Discrete OBB angular velocity did not rotate the collider transform");
+    }
+    {
+        Scene invalid;
+        const Entity box=invalid.createEntity("continuous box");
+        RigidBodyComponent spinningBox;
+        spinningBox.shape=ColliderShape::Box;
+        spinningBox.continuous=true;
         spinningBox.angularVelocity={0,1,0};
         expectFailure([&] { invalid.setRigidBody(box,spinningBox); },
-                      "AABB angular velocity must be rejected before OBB support");
+                      "Continuous translation-only Box CCD must reject spin");
     }
     {
         Scene invalid;

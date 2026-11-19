@@ -38,9 +38,10 @@ struct MeshRendererComponent {
     Material material{};
 };
 
-// Unparented rigid-body state. Linear collision response remains based on
-// sphere/AABB geometry in world units; dynamic spheres may additionally carry
-// free-spin angular velocity because their collider is rotation-invariant.
+// Unparented rigid-body state. Sphere and Box colliders use world-unit
+// dimensions. Box orientation comes from the root transform for discrete OBB
+// contacts. Dynamic spheres and non-continuous boxes may carry angular velocity.
+// Continuous boxes intentionally remain translation-only until rotating OBB CCD.
 // Static bodies have infinite mass and are moved by game/editor code.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
@@ -54,9 +55,9 @@ struct RigidBodyComponent {
     bool isStatic = false;       // infinite mass, no integration
     bool continuous = false;     // opt-in translation CCD; moving peers also opt in
     ColliderShape shape = ColliderShape::Sphere;
-    glm::vec3 halfExtents{0.5f}; // WORLD units, for AABB boxes only
+    glm::vec3 halfExtents{0.5f}; // body-local OBB half extents in world units
     // Kept at the end to preserve older positional aggregate initializers.
-    glm::vec3 angularVelocity{0.0f}; // radians/second; dynamic spheres only
+    glm::vec3 angularVelocity{0.0f}; // world-axis radians/second
 };
 
 struct SceneStats {
@@ -135,6 +136,7 @@ private:
         float normalImpulse = 0.0f;
         glm::vec3 tangentImpulse{0.0f};
         glm::vec3 normal{1.0f,0.0f,0.0f};
+        glm::vec3 point{0.0f};
         std::uint64_t lastSeenStep = 0;
     };
 

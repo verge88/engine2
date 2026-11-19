@@ -230,6 +230,12 @@ if(BUILD_TESTING)
     add_test(NAME sphere-angular-contact-torque-unit
              COMMAND engine2_angular_contact_tests)
 
+    add_executable(engine2_obb_dynamics_tests
+        tests/obb_dynamics_test.cpp)
+    target_link_libraries(engine2_obb_dynamics_tests PRIVATE engine2_core)
+    add_test(NAME obb-angular-dynamics-contact-unit
+             COMMAND engine2_obb_dynamics_tests)
+
     add_executable(engine2_arena_game_tests tests/arena_game_test.cpp)
     target_link_libraries(engine2_arena_game_tests PRIVATE engine2_core)
     add_test(NAME orb-arena-gameplay-unit
