@@ -222,6 +222,12 @@ if(BUILD_TESTING)
     target_link_libraries(engine2_angular_dynamics_tests PRIVATE engine2_core)
     add_test(NAME sphere-angular-dynamics-json-unit
              COMMAND engine2_angular_dynamics_tests)
+
+    add_executable(engine2_angular_contact_tests
+        tests/angular_contact_test.cpp)
+    target_link_libraries(engine2_angular_contact_tests PRIVATE engine2_core)
+    add_test(NAME sphere-angular-contact-torque-unit
+             COMMAND engine2_angular_contact_tests)
     add_executable(engine2_scene_inspector_tests tests/scene_inspector_test.cpp)
     target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
     target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
