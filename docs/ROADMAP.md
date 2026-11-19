@@ -204,9 +204,10 @@
 - [x] 361 аналитически проверенная траектория + интеграция со Scene
 - [x] Xvfb/OpenGL регрессия по изображениям и сохранение состояния Scene JSON
 
-## v2.5 — развитие физики и инструментов сцены (план)
-- [ ] CCD динамических коробок и устойчивые длительные контакты на больших скоростях
-- [ ] Persistent contact manifolds, angular dynamics, joints и вращающиеся OBB
+## v2.5 — развитие физики и инструментов сцены (в работе)
+- [x] Translation-only CCD динамических AABB против sphere/AABB, включая moving/moving и несколько ударов за fixed step
+- [ ] Persistent contact manifolds и устойчивые длительные контакты на больших скоростях
+- [ ] Angular dynamics, joints и вращающиеся OBB
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
