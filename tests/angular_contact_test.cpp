@@ -80,6 +80,21 @@ int main() {
                 "Symmetric sphere collision produced asymmetric spin");
     }
 
+    // Deep sphere/AABB containment uses a correction normal whose sign is
+    // opposite the physical sphere surface point. Torque must still use the
+    // actual nearest-face lever arm, otherwise spin reverses.
+    {
+        Scene scene;
+        const Entity sphere=makeSphere(scene,{0.30f,0,0},{-1,1,0});
+        RigidBodyComponent small=scene.rigidBody(sphere);
+        small.radius=0.25f;
+        scene.setRigidBody(sphere,small);
+        makeStaticBox(scene,{0,0,0},{0.5f,0.5f,0.5f});
+        (void)scene.advance(Scene::fixedDeltaSeconds);
+        require(scene.rigidBody(sphere).angularVelocity.z < -0.1f,
+                "Contained sphere/AABB contact used the wrong torque lever arm");
+    }
+
     // CCD path must apply the same angular impulse at time-of-impact rather
     // than tunnelling with unchanged angular velocity.
     {
