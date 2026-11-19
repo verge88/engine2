@@ -38,9 +38,10 @@ struct MeshRendererComponent {
     Material material{};
 };
 
-// Unparented translation-only collider with Newtonian response. Sphere radius
-// and AABB half extents are explicitly in world units (independent of mesh
-// scale). Static bodies have infinite mass and are moved by game code.
+// Unparented rigid-body state. Linear collision response remains based on
+// sphere/AABB geometry in world units; dynamic spheres may additionally carry
+// free-spin angular velocity because their collider is rotation-invariant.
+// Static bodies have infinite mass and are moved by game/editor code.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
     glm::vec3 angularVelocity{0.0f}; // radians/second; dynamic spheres only
