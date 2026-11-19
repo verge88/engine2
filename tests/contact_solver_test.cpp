@@ -30,6 +30,17 @@ int main() {
           near(bounce.accumulatedNormal,5.4f),
           "Iterative normal impulses must preserve restitution");
 
+    // A high-speed inelastic impact is not a resting contact just because
+    // its restitution target is zero; its large impulse must not persist.
+    moving={3,0,0};
+    fixed={0,0,0};
+    ContactImpulseState inelasticImpact;
+    solveContactImpulse(moving,fixed,1.0f,0.0f,normal,
+                        {0,0,0},{0,0,0},inelasticImpact);
+    check(!inelasticImpact.persistentEligible &&
+          near(inelasticImpact.reboundTarget,0.0f),
+          "Zero-restitution impacts must not enter persistent cache");
+
     // A persistent resting constraint can re-apply last step's cached
     // normal/tangent impulse before the iterative solve starts.
     moving={0,0,0};
