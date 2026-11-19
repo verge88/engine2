@@ -78,29 +78,66 @@ void SceneGui::setGridStep(float value) {
     gridStep_ = value;
 }
 
-void SceneGui::choose(Scene& scene, Entity entity) {
-    selected_ = entity;
+void SceneGui::select(Scene& scene, Entity entity, bool additive) {
+    selection_.pick(scene, entity, additive);
+    selected_ = selection_.primary();
     nameBuffer_.fill('\0');
-    if (scene.contains(entity)) {
-        const std::string& name = scene.name(entity);
-        std::snprintf(nameBuffer_.data(), nameBuffer_.size(), "%s", name.c_str());
+    if (scene.contains(selected_)) {
+        std::snprintf(nameBuffer_.data(), nameBuffer_.size(),
+                      "%s", scene.name(selected_).c_str());
     }
+    activeAxis_ = -1;
+}
+
+void SceneGui::choose(Scene& scene, Entity entity) {
+    select(scene, entity, false);
 }
 
 void SceneGui::selectIndex(const Scene& scene, std::size_t index) {
     const auto handles = scene.entities();
     if (index >= handles.size())
         throw std::invalid_argument("GUI selected entity index is out of range");
-    selected_ = handles[index];
+    selection_.pick(scene,handles[index],false);
+    selected_ = selection_.primary();
     nameBuffer_.fill('\0');
     std::snprintf(nameBuffer_.data(), nameBuffer_.size(),
                   "%s", scene.name(selected_).c_str());
 }
 
+void SceneGui::addIndex(const Scene& scene, std::size_t index) {
+    const auto handles = scene.entities();
+    if (index >= handles.size())
+        throw std::invalid_argument("GUI additive entity index is out of range");
+    selection_.pick(scene,handles[index],true);
+    selected_ = selection_.primary();
+    nameBuffer_.fill('\0');
+    if (scene.contains(selected_))
+        std::snprintf(nameBuffer_.data(), nameBuffer_.size(),
+                      "%s", scene.name(selected_).c_str());
+}
+
+Entity SceneGui::pickAt(Scene& scene, const Camera& camera,
+                         glm::vec2 pixel, glm::vec2 viewport, bool additive) {
+    if (viewport.x <= 0.0f || viewport.y <= 0.0f)
+        throw std::invalid_argument("Scene pick viewport is invalid");
+    const glm::mat4 vp = camera.projectionMatrix(viewport.x/viewport.y) *
+                         camera.viewMatrix();
+    const auto ray = viewportPickRay(vp,pixel,viewport);
+    if (!ray) throw std::invalid_argument("Scene picking pixel is outside viewport");
+    const auto hit = pickSceneBounds(scene,*ray);
+    select(scene,hit ? hit->entity : Entity{},additive);
+    return hit ? hit->entity : Entity{};
+}
+
 void SceneGui::undo(Scene& scene) {
     if (history_.undo(scene)) {
-        if (scene.contains(selected_)) choose(scene, selected_);
-        else selected_ = {};
+        selection_.prune(scene);
+        selected_=selection_.primary();
+        if (scene.contains(selected_)) {
+            nameBuffer_.fill('\0');
+            std::snprintf(nameBuffer_.data(),nameBuffer_.size(),
+                          "%s",scene.name(selected_).c_str());
+        }
         edited_ = true;
         status_ = "Undo";
     }
@@ -108,8 +145,13 @@ void SceneGui::undo(Scene& scene) {
 
 void SceneGui::redo(Scene& scene) {
     if (history_.redo(scene)) {
-        if (scene.contains(selected_)) choose(scene, selected_);
-        else selected_ = {};
+        selection_.prune(scene);
+        selected_=selection_.primary();
+        if (scene.contains(selected_)) {
+            nameBuffer_.fill('\0');
+            std::snprintf(nameBuffer_.data(),nameBuffer_.size(),
+                          "%s",scene.name(selected_).c_str());
+        }
         edited_ = true;
         status_ = "Redo";
     }
@@ -154,7 +196,7 @@ void SceneGui::drawHierarchy(Scene& scene) {
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                        ImGuiTreeNodeFlags_SpanAvailWidth |
                                        ImGuiTreeNodeFlags_DefaultOpen;
-            if (selected_ == entity) flags |= ImGuiTreeNodeFlags_Selected;
+            if (selection_.contains(entity)) flags |= ImGuiTreeNodeFlags_Selected;
             if (!hasChildren || depth >= 48)
                 flags |= ImGuiTreeNodeFlags_Leaf |
                          ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -162,7 +204,10 @@ void SceneGui::drawHierarchy(Scene& scene) {
                 scene.name(entity).empty() ? "(unnamed entity)"
                                            : scene.name(entity).c_str(),
                 flags);
-            if (ImGui::IsItemClicked()) choose(scene, entity);
+            if (ImGui::IsItemClicked()) {
+                const ImGuiIO& io = ImGui::GetIO();
+                select(scene,entity,io.KeyCtrl || io.KeyShift);
+            }
             if (expanded && hasChildren && depth < 48) {
                 tree(entity, depth + 1);
                 ImGui::TreePop();
@@ -353,17 +398,20 @@ void SceneGui::drawProperties(Scene& scene) {
                     ColliderShape::Box ? "AABB Box" : "Sphere");
     }
     ImGui::Separator();
-    if (ImGui::Button("Delete selected entity")) {
+    if (ImGui::Button(selection_.size()>1 ? "Delete selected entities"
+                                          : "Delete selected entity")) {
+        const auto roots = selection_.roots(scene);
         history_.perform(scene,[&](Scene& working) {
-            working.destroyEntity(entity);
+            for (Entity root : roots) working.destroyEntity(root);
         });
-        selected_={};
+        select(scene,{},false);
         edited_=true;
-        status_="Deleted entity (and descendants)";
+        status_="Deleted selected entities and descendants";
     }
 }
 
 void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
+    gizmoHovering_=false;
     if (!gizmoEnabled_ || !scene.contains(selected_)) {
         activeAxis_=-1;
         activeAxisCheckpointed_=false;
@@ -475,6 +523,7 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
     list->AddCircleFilled(ImVec2(origin->x,origin->y),4,
                           IM_COL32(240,240,240,255),16);
 
+    gizmoHovering_ = hovered>=0 || activeAxis_>=0;
     bool started=false;
     if (activeAxis_<0 && hovered>=0 &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
@@ -484,6 +533,14 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
         dragStartLocal_=scene.localTransform(selected_);
         dragParentWorld_=scene.parent(selected_)
             ? scene.worldTransform(scene.parent(selected_)) : glm::mat4(1.0f);
+        dragTargets_.clear();
+        for (Entity root : selection_.roots(scene)) {
+            dragTargets_.push_back({
+                root,scene.localTransform(root),
+                scene.parent(root) ? scene.worldTransform(scene.parent(root))
+                                   : glm::mat4(1.0f)
+            });
+        }
         dragMouseStart_=pointer;
         dragMousePrevious_=pointer;
         dragCenterScreen_=*origin;
@@ -511,15 +568,21 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
                     drag/=std::max(dragProjection_.worldLength,0.01f);
             }
             try {
-                const glm::mat4 next=applyGizmoTransform(
-                    dragStartLocal_,dragParentWorld_,mode,activeAxis_,drag,
-                    snapping_,gridStep_);
-                if (differentMatrix(next,scene.localTransform(selected_))) {
+                std::vector<std::pair<Entity,glm::mat4>> pending;
+                for (const DragTarget& target : dragTargets_) {
+                    const glm::mat4 next=applyGizmoTransform(
+                        target.local,target.parentWorld,mode,activeAxis_,drag,
+                        snapping_,gridStep_);
+                    if (differentMatrix(next,scene.localTransform(target.entity)))
+                        pending.emplace_back(target.entity,next);
+                }
+                if (!pending.empty()) {
                     if (!activeAxisCheckpointed_) {
                         history_.checkpoint(scene);
                         activeAxisCheckpointed_=true;
                     }
-                    scene.setLocalTransform(selected_,next);
+                    for (const auto& [entity,transform] : pending)
+                        scene.setLocalTransform(entity,transform);
                     edited_=true;
                 }
             } catch(const std::exception& error) {
@@ -531,10 +594,57 @@ void SceneGui::drawGizmo(Scene& scene, const Camera& camera) {
     dragMousePrevious_=pointer;
 }
 
+void SceneGui::drawSelectionOutlines(const Scene& scene,
+                                      const Camera& camera) {
+    const ImGuiIO& io=ImGui::GetIO();
+    const glm::vec2 screen(io.DisplaySize.x,io.DisplaySize.y);
+    if (screen.x<128.0f || screen.y<128.0f) return;
+    const glm::mat4 vp=camera.projectionMatrix(screen.x/screen.y) *
+                       camera.viewMatrix();
+    ImDrawList* overlay=ImGui::GetForegroundDrawList();
+
+    for (Entity entity : selection_.entities()) {
+        if (!scene.contains(entity) || !pickableVisible(scene,entity)) continue;
+        const auto* renderer=scene.rendererComponent(entity);
+        if (!renderer || !renderer->mesh) continue;
+        const Bounds bounds=renderer->mesh->bounds();
+        const glm::mat4 world=scene.worldTransform(entity);
+        glm::vec2 minScreen(1.0e9f);
+        glm::vec2 maxScreen(-1.0e9f);
+        int visibleCorners=0;
+        for (int corner=0;corner<8;++corner) {
+            const glm::vec3 local(
+                corner & 1 ? bounds.max.x : bounds.min.x,
+                corner & 2 ? bounds.max.y : bounds.min.y,
+                corner & 4 ? bounds.max.z : bounds.min.z);
+            const glm::vec3 worldCorner(world*glm::vec4(local,1.0f));
+            const auto pixel=projectGizmoPoint(vp,worldCorner,screen);
+            if (!pixel) continue;
+            minScreen=glm::min(minScreen,*pixel);
+            maxScreen=glm::max(maxScreen,*pixel);
+            ++visibleCorners;
+        }
+        if (visibleCorners<2) continue;
+        if (maxScreen.x<0 || maxScreen.y<0 ||
+            minScreen.x>screen.x || minScreen.y>screen.y) continue;
+        minScreen=glm::clamp(minScreen,glm::vec2(0),screen);
+        maxScreen=glm::clamp(maxScreen,glm::vec2(0),screen);
+        if (maxScreen.x-minScreen.x<2 || maxScreen.y-minScreen.y<2)
+            continue;
+        const ImU32 color=entity==selected_
+            ? IM_COL32(255,224,91,255)
+            : IM_COL32(94,212,246,235);
+        overlay->AddRect(ImVec2(minScreen.x,minScreen.y),
+                         ImVec2(maxScreen.x,maxScreen.y),color,
+                         0.0f,0,2.0f);
+    }
+}
+
 void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
                     const Camera& camera) {
     if (!visible_) return;
-    if (selected_ && !scene.contains(selected_)) selected_={};
+    selection_.prune(scene);
+    selected_=selection_.primary();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -557,7 +667,10 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         ImGui::Text("Entities: %zu   Meshes: %zu   Lights: %zu   Bodies: %zu",
                     stats.entities,stats.renderables,stats.pointLights,
                     stats.rigidBodies);
-        ImGui::TextDisabled("F1: camera   Move / Rotate / Scale X,Y,Z in viewport");
+        ImGui::TextDisabled("Click mesh: select   Ctrl/Shift+click: toggle");
+        ImGui::Text("Selected: %zu   Primary: %s",selection_.size(),
+                    scene.contains(selected_) ? scene.name(selected_).c_str() : "(none)");
+        ImGui::TextDisabled("F1: camera   Move / Rotate / Scale X,Y,Z");
         ImGui::BeginDisabled(!history_.canUndo());
         if (ImGui::Button("Undo (Ctrl+Z)")) undo(scene);
         ImGui::EndDisabled();
@@ -593,7 +706,7 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
             edited_=true;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Deselect")) selected_={};
+        if (ImGui::Button("Deselect")) select(scene,{},false);
         drawProperties(scene);
         ImGui::SeparatorText("Save Scene");
         ImGui::InputText("JSON path",savePath_.data(),savePath_.size());
@@ -616,6 +729,18 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
     ImGui::End();
 
     drawGizmo(scene,camera);
+    // Gizmo gets first refusal: clicking a handle must not also pick the
+    // mesh behind it. ImGui windows consume clicks before viewport picking.
+    if (!gizmoHovering_ && activeAxis_<0 &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) {
+        const glm::vec2 pixel(io.MousePos.x,io.MousePos.y);
+        const glm::vec2 size(io.DisplaySize.x,io.DisplaySize.y);
+        if (pixel.x>=0 && pixel.y>=0 &&
+            pixel.x<size.x && pixel.y<size.y)
+            (void)pickAt(scene,camera,pixel,size,io.KeyCtrl||io.KeyShift);
+    }
+    drawSelectionOutlines(scene,camera);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     if (!open) setVisible(false);

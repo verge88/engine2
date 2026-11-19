@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.7.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -163,6 +163,9 @@ if(BUILD_TESTING)
     target_include_directories(engine2_gizmo_transform_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_test(NAME gizmo-transform-snap-unit COMMAND engine2_gizmo_transform_tests)
+    add_executable(engine2_scene_picking_tests tests/scene_picking_test.cpp)
+    target_link_libraries(engine2_scene_picking_tests PRIVATE engine2_core)
+    add_test(NAME scene-ray-picking-unit COMMAND engine2_scene_picking_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -351,6 +354,13 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(gizmo-modes-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME scene-ray-picking-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_scene_picking.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(scene-ray-picking-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 
