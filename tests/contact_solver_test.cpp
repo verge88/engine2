@@ -89,6 +89,40 @@ int main() {
                             {0,0,0},{0,0,0},frictionless);
     check(near(moving.y,1),"Default material must remain frictionless");
 
+    // Static friction at a sphere contact couples translation to spin.
+    // For m=r=1, inv(I)=5/2 and the tangent effective inverse mass is 3.5.
+    moving={2,1,0};
+    fixed={0,0,0};
+    glm::vec3 spin(0.0f),fixedSpin(0.0f);
+    ContactImpulseState rollingContact;
+    for (int i=0;i<8;++i)
+        solveContactImpulseAngular(
+            moving,spin,fixed,fixedSpin,
+            1.0f,0.0f,2.5f,0.0f,
+            {1,0,0},{0,0,0},normal,
+            {0,1.0f,0.7f},{0,1.0f,0.7f},rollingContact);
+    check(near(moving.x,0.0f) && near(moving.y,5.0f/7.0f) &&
+          near(spin.z,-5.0f/7.0f),
+          "Sphere friction impulse did not generate expected spin");
+    const glm::vec3 rollingPoint=
+        contactPointVelocity(moving,spin,{1,0,0});
+    check(near(rollingPoint.y,0.0f),
+          "Static friction must cancel sphere contact-point slip");
+
+    // The same coupling applies at the ground plane and preserves the old
+    // linear-only wrapper behavior when inverse inertia is zero.
+    glm::vec3 floorVelocity(1,-1,0),floorSpin(0.0f);
+    solveFloorImpactAngular(
+        floorVelocity,floorSpin,1.0f,2.5f,1.0f,{0,1.0f,0.5f});
+    check(near(floorVelocity.x,5.0f/7.0f) &&
+          near(floorVelocity.y,0.0f) &&
+          near(floorSpin.z,-5.0f/7.0f),
+          "Floor friction did not convert sphere slip into spin");
+    const glm::vec3 floorPoint=contactPointVelocity(
+        floorVelocity,floorSpin,{0,-1,0});
+    check(near(floorPoint.x,0.0f),
+          "Floor static friction must cancel contact-point slip");
+
     // Floor normal impulse from gravity cancels horizontal motion if
     // inside the static cone; otherwise applies dynamic slowing.
     glm::vec3 slow(0.1f,-0.2f,0);
