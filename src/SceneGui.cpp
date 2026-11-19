@@ -398,6 +398,26 @@ void SceneGui::drawProperties(Scene& scene) {
             working.setRigidBody(entity,modified);
         });
 
+        float staticFriction=scene.rigidBodyComponent(entity)->staticFriction;
+        const bool changedStatic=ImGui::SliderFloat(
+            "Static friction",&staticFriction,0.0f,4.0f);
+        applyWidgetEdit(scene,changedStatic,[&](Scene& working) {
+            RigidBodyComponent modified=*working.rigidBodyComponent(entity);
+            modified.staticFriction=staticFriction;
+            modified.dynamicFriction=std::min(modified.dynamicFriction,staticFriction);
+            working.setRigidBody(entity,modified);
+        });
+
+        float dynamicFriction=scene.rigidBodyComponent(entity)->dynamicFriction;
+        const float currentStatic=scene.rigidBodyComponent(entity)->staticFriction;
+        const bool changedDynamic=ImGui::SliderFloat(
+            "Dynamic friction",&dynamicFriction,0.0f,currentStatic);
+        applyWidgetEdit(scene,changedDynamic,[&](Scene& working) {
+            RigidBodyComponent modified=*working.rigidBodyComponent(entity);
+            modified.dynamicFriction=dynamicFriction;
+            working.setRigidBody(entity,modified);
+        });
+
         bool gravity=scene.rigidBodyComponent(entity)->gravity;
         if (ImGui::Checkbox("Gravity",&gravity)) {
             history_.perform(scene,[&](Scene& working) {

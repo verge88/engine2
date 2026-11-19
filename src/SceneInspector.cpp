@@ -134,6 +134,9 @@ std::string inspectScene(const Scene& scene, const SceneAssetRegistry& assets) {
             record["rigidBody"] = {
                 {"shape", body->shape == ColliderShape::Box ? "BOX" : "SPHERE"},
                 {"mass", body->mass},
+                {"restitution", body->restitution},
+                {"staticFriction", body->staticFriction},
+                {"dynamicFriction", body->dynamicFriction},
                 {"isStatic", body->isStatic},
                 {"velocity", vectorJson(body->velocity)}
             };
@@ -212,6 +215,14 @@ std::size_t applySceneEdits(Scene& scene, std::string_view editsJson) {
             PointLight modified = *current;
             modified.intensity = numeric(change.at("intensity"), 0.0f, 1.0e6f);
             working.setPointLight(entity, modified);
+        } else if (op == "set-body-friction") {
+            const RigidBodyComponent* current = working.rigidBodyComponent(entity);
+            if (!current)
+                throw std::invalid_argument("Scene edit target has no RigidBody");
+            RigidBodyComponent modified = *current;
+            modified.staticFriction = numeric(change.at("staticFriction"),0.0f,4.0f);
+            modified.dynamicFriction = numeric(change.at("dynamicFriction"),0.0f,4.0f);
+            working.setRigidBody(entity,modified);
         } else if (op == "set-body-velocity") {
             const RigidBodyComponent* current = working.rigidBodyComponent(entity);
             if (!current)

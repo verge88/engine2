@@ -1,0 +1,27 @@
+{
+  "format": "engine2.scene-edits",
+  "version": 1,
+  "operations": [
+    {
+      "op": "set-body-velocity",
+      "entity": 27,
+      "velocity": [
+        3.2,
+        0,
+        1.1
+      ]
+    },
+    {
+      "op": "set-body-friction",
+      "entity": 26,
+      "staticFriction": 2,
+      "dynamicFriction": 1.5
+    },
+    {
+      "op": "set-body-friction",
+      "entity": 27,
+      "staticFriction": 2,
+      "dynamicFriction": 1.5
+    }
+  ]
+}
