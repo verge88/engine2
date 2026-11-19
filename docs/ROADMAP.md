@@ -97,16 +97,25 @@
 - [x] JSON backward compatibility: v1.2 файлы без shape/halfExtents
 - [x] Unit/contact/JSON и headless OpenGL screenshot + save/reload проверки
 
-## v1.4 — инструменты сцены и улучшенная физика (план)
+## v1.4 — CLI-инспектор и атомарный редактор Scene (готово)
+- [x] JSON-отчёт сущностей: индексы, имена, parent/depth, локальные/world позиции
+- [x] Инспектирование effective visibility и компонентов mesh/material/light/rigidBody
+- [x] Транзакционные JSON-патчи (rename, enable, local/world position, reparent, delete)
+- [x] Изменение albedo, интенсивности источников и скорости физического тела
+- [x] Стабильные ссылки на исходный список сущностей внутри пакета, контроль циклов и ошибок
+- [x] CLI --inspect-scene / --edit-scene, сохранение отредактированного мира через --save-scene
+- [x] Unit-тесты транзакций и иерархии + headless тест реального рендеринга и save/reload
+
+## v1.5 — игровые инструменты и улучшенная физика (план)
+- [ ] Графический редактор с деревом иерархии, inspector, viewport gizmo и undo/redo
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
-- [ ] Редактор/inspector Scene с сохранением и изменением компонентов
 - [ ] Asset-bundle или надёжные внешние asset paths, миграции версий JSON
 - [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
 - [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions, async exposure readback
 
-## v1.5+ — крупные игровые системы (план)
+## v1.6+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.3.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ add_library(engine2_core STATIC
     src/CascadedShadowMaps.cpp
     src/Scene.cpp
     src/SceneIO.cpp
+    src/SceneInspector.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -121,6 +122,10 @@ if(BUILD_TESTING)
     add_executable(engine2_box_collision_tests tests/box_collision_test.cpp)
     target_link_libraries(engine2_box_collision_tests PRIVATE engine2_core)
     add_test(NAME box-collision-unit COMMAND engine2_box_collision_tests)
+    add_executable(engine2_scene_inspector_tests tests/scene_inspector_test.cpp)
+    target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
+    target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
+    add_test(NAME scene-inspector-editor-unit COMMAND engine2_scene_inspector_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -275,6 +280,16 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(box-collision-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # JSON inspector + transaction editor: check world-space positions,
+        # hidden meshes, rendered pixel changes and save/load equivalence.
+        add_test(NAME scene-inspector-editor-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_scene_inspector.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/scene-edits-demo.json")
+        set_tests_properties(scene-inspector-editor-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

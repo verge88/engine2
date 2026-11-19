@@ -1,0 +1,10 @@
+{
+  "format": "engine2.scene-edits",
+  "version": 1,
+  "operations": [
+    {"op": "rename", "entity": 13, "name": "Floating green sphere"},
+    {"op": "set-position", "entity": 13, "space": "world", "position": [0.0, 1.4, 0.0]},
+    {"op": "set-albedo", "entity": 13, "color": [0.05, 0.95, 0.15]},
+    {"op": "set-enabled", "entity": 14, "enabled": false}
+  ]
+}

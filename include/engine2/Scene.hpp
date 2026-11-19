@@ -75,6 +75,7 @@ public:
     [[nodiscard]] bool contains(Entity entity) const;
 
     [[nodiscard]] const std::string& name(Entity entity) const;
+    void setName(Entity entity, std::string name);
     void setParent(Entity child, Entity parent = {}, bool keepWorld = false);
     [[nodiscard]] Entity parent(Entity entity) const;
 
