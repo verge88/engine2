@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.4.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,12 +37,36 @@ FetchContent_Declare(tinygltf
     GIT_TAG v2.9.7
     GIT_SHALLOW TRUE
 )
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.9b
+    GIT_SHALLOW TRUE
+)
 FetchContent_MakeAvailable(glfw glm glad)
 # tinygltf is header-only; don't build its examples/tests.
 FetchContent_GetProperties(tinygltf)
 if(NOT tinygltf_POPULATED)
     FetchContent_Populate(tinygltf)
 endif()
+# Dear ImGui is a source library with no upstream CMakeLists.txt.
+FetchContent_GetProperties(imgui)
+if(NOT imgui_POPULATED)
+    FetchContent_Populate(imgui)
+endif()
+add_library(engine2_imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(engine2_imgui PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(engine2_imgui PUBLIC glfw)
+
 glad_add_library(glad_gl_core_33 REPRODUCIBLE API gl:core=3.3)
 
 add_library(engine2_core STATIC
@@ -68,8 +92,8 @@ target_include_directories(engine2_core PUBLIC
 target_link_libraries(engine2_core PUBLIC glfw glad_gl_core_33 glm::glm)
 target_compile_features(engine2_core PUBLIC cxx_std_20)
 
-add_executable(engine2 src/main.cpp)
-target_link_libraries(engine2 PRIVATE engine2_core)
+add_executable(engine2 src/main.cpp src/SceneGui.cpp)
+target_link_libraries(engine2 PRIVATE engine2_core engine2_imgui)
 
 if(MSVC)
     target_compile_options(engine2_core PRIVATE /W4 /permissive-)
@@ -290,6 +314,16 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/scene-edits-demo.json")
         set_tests_properties(scene-inspector-editor-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Actual Dear ImGui GPU overlay, selected entities, headless
+        # compositing, edited materials, and invalid GUI selection.
+        add_test(NAME scene-gui-overlay-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_scene_gui.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/scene-edits-demo.json")
+        set_tests_properties(scene-gui-overlay-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

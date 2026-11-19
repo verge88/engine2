@@ -106,16 +106,25 @@
 - [x] CLI --inspect-scene / --edit-scene, сохранение отредактированного мира через --save-scene
 - [x] Unit-тесты транзакций и иерархии + headless тест реального рендеринга и save/reload
 
-## v1.5 — игровые инструменты и улучшенная физика (план)
-- [ ] Графический редактор с деревом иерархии, inspector, viewport gizmo и undo/redo
+## v1.5 — встроенный графический инспектор (готово)
+- [x] Dear ImGui + GLFW/OpenGL 3.3 в интерактивном runtime
+- [x] GUI-дерево сущностей и выбор с generation handles; статус компонентов
+- [x] Изменение имени, parent, enabled, позиции и PBR material в окне
+- [x] GUI-редактирование point-light и rigid-body компонентов, удаление/создание
+- [x] Сохранение сцены через кнопку в SceneIO JSON с отображением ошибок
+- [x] F1, переключение захвата мыши, пауза камеры/физики при открытом GUI
+- [x] --gui 0|1 и --gui-select N, headless image-regression тесты ImGui
+
+## v1.6 — более полный редактор и физика (план)
+- [ ] Gizmo объектов, undo/redo и отдельный editor с asset browser
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
-- [ ] Asset-bundle или надёжные внешние asset paths, миграции версий JSON
-- [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
+- [ ] Asset-bundle/portable asset paths, миграции JSON schema
+- [ ] Восстановить glTF node hierarchy, анимации и skinning
 - [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
-- [ ] UV1 и KHR glTF extensions, async exposure readback
+- [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v1.6+ — крупные игровые системы (план)
+## v1.7+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
