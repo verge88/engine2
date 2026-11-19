@@ -139,14 +139,15 @@ inline void solveContactImpulseAngular(
     const glm::vec3 rel=frictionPointB-frictionPointA;
     const glm::vec3 tangentSpeed=rel-glm::dot(rel,normal)*normal;
     const float tangentMagnitude=glm::length(tangentSpeed);
-    if (tangentMagnitude < 1.0e-8f) return;
-    const glm::vec3 tangentDirection=tangentSpeed/tangentMagnitude;
-    const float tangentInvMass=directionalInverseMass(
-        invMassA,invMassB,invInertiaA,invInertiaB,
-        leverArmA,leverArmB,tangentDirection);
-    if (tangentInvMass <= 0.0f) return;
-    glm::vec3 proposed=
-        state.accumulatedTangent-tangentSpeed/tangentInvMass;
+    glm::vec3 proposed=state.accumulatedTangent;
+    if (tangentMagnitude >= 1.0e-8f) {
+        const glm::vec3 tangentDirection=tangentSpeed/tangentMagnitude;
+        const float tangentInvMass=directionalInverseMass(
+            invMassA,invMassB,invInertiaA,invInertiaB,
+            leverArmA,leverArmB,tangentDirection);
+        if (tangentInvMass <= 0.0f) return;
+        proposed-=tangentSpeed/tangentInvMass;
+    }
     const float magnitude=glm::length(proposed);
     const float staticLimit=staticMu*newNormal;
     if (magnitude > staticLimit && magnitude > 1.0e-8f)
