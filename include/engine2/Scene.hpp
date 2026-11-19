@@ -43,6 +43,7 @@ struct MeshRendererComponent {
 // scale). Static bodies have infinite mass and are moved by game code.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
+    glm::vec3 angularVelocity{0.0f}; // radians/second; dynamic spheres only
     bool gravity = true;
     float radius = 0.5f;          // world-space approximate bounding sphere
     float groundHeight = -1.0f;  // world-space collision plane
