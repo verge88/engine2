@@ -45,6 +45,8 @@ struct RigidBodyComponent {
     float radius = 0.5f;          // world-space approximate bounding sphere
     float groundHeight = -1.0f;  // world-space collision plane
     float restitution = 0.35f;   // 0: no bounce, 1: full elastic bounce
+    float staticFriction = 0.0f; // legacy scenes remain frictionless
+    float dynamicFriction = 0.0f;// <= staticFriction, sliding resistance
     float mass = 1.0f;           // kilograms, strictly positive for dynamics
     bool isStatic = false;       // infinite mass, no integration
     ColliderShape shape = ColliderShape::Sphere;
@@ -60,6 +62,7 @@ struct SceneStats {
     std::uint64_t broadphasePairs = 0; // accumulated x-axis overlap candidates
     std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
     std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
+    std::uint64_t solverPasses = 0;    // accumulated sequential solver passes
 };
 
 // A small runtime object/component world rather than a data-oriented archetype
@@ -131,6 +134,7 @@ private:
     std::uint64_t broadphasePairs_ = 0;
     std::uint64_t sphereContacts_ = 0;
     std::uint64_t boxContacts_ = 0;
+    std::uint64_t solverPasses_ = 0;
 };
 
 } // namespace engine2

@@ -162,8 +162,19 @@
 - [x] Тест эквивалентности с полным перебором на 32,768-треугольной сетке, порог 50× по числу проверок
 - [x] End-to-end Xvfb/OpenGL тест на procedural sphere и glTF triangle-gap
 
-## v2.1 — улучшение физики и инструменты сцены (план)
-- [ ] 3D broadphase и трение, iterative contact solver/CCD для устойчивой физики
+## v2.1 — трение и итерационный решатель контактов (готово)
+- [x] Static/dynamic Coulomb friction в RigidBodyComponent, validation [0,4], dynamic ≤ static
+- [x] Накопленные нормальные/касательные импульсы пары и фиксированная цель restitution
+- [x] 8 последовательных проходов ограничений за фиксированный шаг (Gauss-Seidel)
+- [x] Коррекция penetration с безопасным обновлением floor-позиции
+- [x] Трение при скольжении по земле, поддержка sphere/box и статических тел
+- [x] Обратная совместимость Scene JSON v1 с пропущенными friction-полями
+- [x] Dear ImGui, CLI JSON-патч set-body-friction, инспекция и физическая статистика
+- [x] Unit-тесты normal/tangent impulses, stacks, JSON; Xvfb/OpenGL сравнение кадров
+
+## v2.2 — развитие физики и редактора (план)
+- [ ] 3D broadphase (пространственная сетка или BVH по телам), CCD, устойчивые долгоживущие manifolds
+- [ ] Angular dynamics, moments of inertia, rotated OBB and joints/constraints
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
@@ -171,7 +182,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.2+ — крупные игровые системы (план)
+## v2.3+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

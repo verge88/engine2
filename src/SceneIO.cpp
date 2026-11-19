@@ -150,6 +150,8 @@ Json writeBody(const RigidBodyComponent& body) {
         {"radius", finiteValue(body.radius)},
         {"groundHeight", finiteValue(body.groundHeight)},
         {"restitution", finiteValue(body.restitution)},
+        {"staticFriction", finiteValue(body.staticFriction)},
+        {"dynamicFriction", finiteValue(body.dynamicFriction)},
         {"mass", finiteValue(body.mass)},
         {"isStatic", body.isStatic},
         {"shape", body.shape == ColliderShape::Box ? "BOX" : "SPHERE"},
@@ -164,6 +166,11 @@ RigidBodyComponent readBody(const Json& data) {
     result.radius = finiteFloat(data.at("radius"));
     result.groundHeight = finiteFloat(data.at("groundHeight"));
     result.restitution = finiteFloat(data.at("restitution"));
+    // v1 schema remains compatible: older scene JSON lacks friction fields.
+    if (data.contains("staticFriction"))
+        result.staticFriction = finiteFloat(data.at("staticFriction"));
+    if (data.contains("dynamicFriction"))
+        result.dynamicFriction = finiteFloat(data.at("dynamicFriction"));
     result.mass = finiteFloat(data.at("mass"));
     result.isStatic = data.at("isStatic").get<bool>();
     // Backward compatibility: v1 scenes saved by engine2 v1.2 do not have

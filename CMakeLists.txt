@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 2.0.0 LANGUAGES C CXX)
+project(engine2 VERSION 2.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -146,6 +146,16 @@ if(BUILD_TESTING)
     add_executable(engine2_box_collision_tests tests/box_collision_test.cpp)
     target_link_libraries(engine2_box_collision_tests PRIVATE engine2_core)
     add_test(NAME box-collision-unit COMMAND engine2_box_collision_tests)
+    # Sequential normal impulses, Coulomb static/dynamic friction and a
+    # gravity-supported stack, independent of a graphics context.
+    add_executable(engine2_contact_solver_tests tests/contact_solver_test.cpp)
+    target_include_directories(engine2_contact_solver_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_contact_solver_tests PRIVATE glm::glm)
+    add_test(NAME contact-solver-friction-math-unit COMMAND engine2_contact_solver_tests)
+    add_executable(engine2_contact_physics_tests tests/contact_physics_test.cpp)
+    target_link_libraries(engine2_contact_physics_tests PRIVATE engine2_core)
+    add_test(NAME scene-friction-stacking-json-unit COMMAND engine2_contact_physics_tests)
     add_executable(engine2_scene_inspector_tests tests/scene_inspector_test.cpp)
     target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
     target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
@@ -330,6 +340,15 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(box-collision-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Export a real physics scene, edit contact-friction parameters,
+        # compare glancing sphere-box collision pixels, then save/reload.
+        add_test(NAME contact-friction-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_contact_friction.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(contact-friction-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
         # JSON inspector + transaction editor: check world-space positions,
         # hidden meshes, rendered pixel changes and save/load equivalence.
