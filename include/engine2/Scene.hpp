@@ -49,7 +49,7 @@ struct RigidBodyComponent {
     float dynamicFriction = 0.0f;// <= staticFriction, sliding resistance
     float mass = 1.0f;           // kilograms, strictly positive for dynamics
     bool isStatic = false;       // infinite mass, no integration
-    bool continuous = false;     // opt-in sweep against STATIC sphere/AABB
+    bool continuous = false;     // opt-in sweep against static shapes / other CCD spheres
     ColliderShape shape = ColliderShape::Sphere;
     glm::vec3 halfExtents{0.5f}; // WORLD units, for AABB boxes only
 };
@@ -63,7 +63,9 @@ struct SceneStats {
     std::uint64_t broadphasePairs = 0; // 3D spatial-grid overlapping pairs
     std::uint64_t broadphaseCells = 0; // accumulated occupied grid cells
     std::uint64_t broadphaseTests = 0; // accumulated cell pair checks
-    std::uint64_t ccdHits = 0;         // swept sphere vs static collider TOIs
+    std::uint64_t ccdHits = 0;         // all swept sphere time-of-impact events
+    std::uint64_t ccdDynamicHits = 0;  // TOIs between two moving CCD spheres
+    std::uint64_t ccdBudgetExhaustions = 0; // remaining time after event limit
     std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
     std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
     std::uint64_t solverPasses = 0;    // accumulated sequential solver passes
@@ -72,7 +74,7 @@ struct SceneStats {
 // A small runtime object/component world rather than a data-oriented archetype
 // ECS. Supports parent-child transforms, renderers, lights and fixed-step
 // rigid-body motion with 3D spatial-grid broadphase, discrete sequential
-// contacts, and optional limited sphere-to-static CCD; independent of
+// contacts, and bounded event-driven sphere CCD; independent of
 // a GL context until Mesh::draw().
 class Scene {
 public:
@@ -140,6 +142,8 @@ private:
     std::uint64_t broadphaseCells_ = 0;
     std::uint64_t broadphaseTests_ = 0;
     std::uint64_t ccdHits_ = 0;
+    std::uint64_t ccdDynamicHits_ = 0;
+    std::uint64_t ccdBudgetExhaustions_ = 0;
     std::uint64_t sphereContacts_ = 0;
     std::uint64_t boxContacts_ = 0;
     std::uint64_t solverPasses_ = 0;

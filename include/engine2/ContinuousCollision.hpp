@@ -14,7 +14,7 @@ namespace engine2 {
 // Fraction of the current fixed-step displacement [0,1], with a unit normal
 // pointing FROM the moving sphere TOWARD its static obstacle.
 // Swept sphere/AABB uses the expanded box slab test (conservative at corners).
-// Sphere/sphere is analytically exact for stationary target centers.
+// Sphere/sphere is analytically exact for stationary or moving centers.
 struct SweptSphereHit {
     float fraction = 1.0f;
     glm::vec3 normal{1.0f, 0.0f, 0.0f};
@@ -81,6 +81,35 @@ inline std::optional<SweptSphereHit> sweepSphereStatic(
         return SweptSphereHit{entry,normal};
     }
     return std::nullopt;
+}
+
+
+ // Analytic relative-motion sweep between two MOVING spheres. Both centers
+ // travel linearly over the same fixed-step remainder, and the returned
+ // normal always points from A toward B at the earliest point of contact.
+ // Already intersecting starts are handled by the ordinary contact solver.
+inline std::optional<SweptSphereHit> sweepSphereMoving(
+    glm::vec3 startA, glm::vec3 endA, float radiusA,
+    glm::vec3 startB, glm::vec3 endB, float radiusB) {
+    const glm::vec3 separation=startB-startA;
+    const glm::vec3 relative=(endB-startB)-(endA-startA);
+    const float lengthSquared=glm::dot(relative,relative);
+    const float combined=radiusA+radiusB;
+    const float c=glm::dot(separation,separation)-combined*combined;
+    if (!(lengthSquared>1.0e-12f) || !std::isfinite(lengthSquared) ||
+        !(c>0.0f) || !std::isfinite(c)) return std::nullopt;
+    const float b=glm::dot(separation,relative);
+    if (b>=0.0f) return std::nullopt; // separated or moving apart
+    const float discriminant=b*b-lengthSquared*c;
+    if (!(discriminant>=0.0f) || !std::isfinite(discriminant))
+        return std::nullopt;
+    const float time=(-b-std::sqrt(discriminant))/lengthSquared;
+    if (time<0.0f || time>1.0f) return std::nullopt;
+    const glm::vec3 difference=separation+relative*time;
+    const float distance=glm::length(difference);
+    if (!(distance>1.0e-7f) || !std::isfinite(distance))
+        return std::nullopt;
+    return SweptSphereHit{time,difference/distance};
 }
 
 } // namespace engine2

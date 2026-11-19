@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 2.2.0 LANGUAGES C CXX)
+project(engine2 VERSION 2.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -169,6 +169,18 @@ if(BUILD_TESTING)
     target_link_libraries(engine2_physics_broadphase_ccd_runtime_tests PRIVATE engine2_core)
     add_test(NAME physics-3d-broadphase-ccd-scene-unit
              COMMAND engine2_physics_broadphase_ccd_runtime_tests)
+
+    add_executable(engine2_ccd_multi_math_tests tests/ccd_multi_math_test.cpp)
+    target_include_directories(engine2_ccd_multi_math_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_ccd_multi_math_tests PRIVATE glm::glm)
+    add_test(NAME ccd-moving-spheres-math-unit
+             COMMAND engine2_ccd_multi_math_tests)
+
+    add_executable(engine2_ccd_multi_scene_tests tests/ccd_multi_scene_test.cpp)
+    target_link_libraries(engine2_ccd_multi_scene_tests PRIVATE engine2_core)
+    add_test(NAME ccd-multi-impact-scene-unit
+             COMMAND engine2_ccd_multi_scene_tests)
     add_executable(engine2_scene_inspector_tests tests/scene_inspector_test.cpp)
     target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
     target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
@@ -369,6 +381,13 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(physics-3d-broadphase-ccd-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME ccd-multi-impact-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_ccd_multi.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(ccd-multi-impact-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
         # JSON inspector + transaction editor: check world-space positions,
         # hidden meshes, rendered pixel changes and save/load equivalence.

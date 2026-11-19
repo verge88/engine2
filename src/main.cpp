@@ -387,7 +387,7 @@ int run(int argc, char** argv) {
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
                      "               [--physics-demo 0|1] [--collision-demo 0|1] [--box-demo 0|1]\n"
-                     "               [--ccd 0|1] [--ccd-speed 0..10000] (requires --box-demo 1)\n"
+                     "               [--ccd 0|1] [--ccd-speed 0..10000] (box/collision demo)\n"
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
@@ -405,8 +405,10 @@ int run(int argc, char** argv) {
 
     if ((args.physicsDemo || args.collisionDemo || args.boxDemo) && args.model)
         throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
-    if ((args.demoCcd || args.demoCcdSpeed) && !args.boxDemo)
-        throw std::invalid_argument("--ccd and --ccd-speed require --box-demo 1");
+    if ((args.demoCcd || args.demoCcdSpeed) &&
+        !(args.boxDemo || args.collisionDemo))
+        throw std::invalid_argument(
+            "--ccd and --ccd-speed require --box-demo 1 or --collision-demo 1");
     if (args.loadScene && (args.physicsDemo || args.collisionDemo || args.boxDemo))
         throw std::invalid_argument("--load-scene cannot be combined with physics/collision demos");
 
@@ -547,7 +549,9 @@ int run(int argc, char** argv) {
             body.radius = 0.55f;
             body.mass = 1.0f;
             body.restitution = 0.92f;
-            body.velocity = glm::vec3(left ? 2.5f : -2.5f, 0.0f, 0.0f);
+            body.continuous=args.demoCcd.value_or(false);
+            const float speed=args.demoCcdSpeed.value_or(2.5f);
+            body.velocity = glm::vec3(left ? speed : -speed,0.0f,0.0f);
             world.setRigidBody(handles[static_cast<std::size_t>(i)], body);
         }
         collisionBalls = handles;
@@ -803,6 +807,8 @@ int run(int argc, char** argv) {
                   << " sceneBroadphaseCells=" << sceneStats.broadphaseCells
                   << " sceneBroadphaseTests=" << sceneStats.broadphaseTests
                   << " sceneCcdHits=" << sceneStats.ccdHits
+                  << " sceneCcdDynamicHits=" << sceneStats.ccdDynamicHits
+                  << " sceneCcdBudgetExhaustions=" << sceneStats.ccdBudgetExhaustions
                   << " sceneSphereContacts=" << sceneStats.sphereContacts
                   << " sceneBoxContacts=" << sceneStats.boxContacts
                   << " sceneSolverPasses=" << sceneStats.solverPasses;

@@ -183,8 +183,19 @@
 - [x] Демонстрационные --ccd и --ccd-speed, telemetry cells/tests/CCD hits
 - [x] CPU-тесты 3D-сетки и CCD + headless OpenGL image regression
 
-## v2.3 — игровая физика и редактор (план)
-- [ ] Многократные CCD-удары за шаг, continuous dynamic/dynamic и точное corner CCD
+## v2.3 — многократная CCD и движущиеся сферы (готово)
+- [x] Relative-motion analytic TOI для двух динамических сфер, обе с continuous=true
+- [x] Глобальное упорядочивание CCD-событий по времени первого контакта
+- [x] Перестроение swept 3D broadphase для остатка времени после каждого удара
+- [x] Не более 12 непрерывных ударов за fixed step с диагностикой fallback
+- [x] Массы, restitution, трение и позиционное разделение на момент CCD удара
+- [x] CLI --collision-demo 1 --ccd 1 --ccd-speed 180 для head-on сценария
+- [x] --stats: sceneCcdDynamicHits и sceneCcdBudgetExhaustions
+- [x] CPU-тесты moving/moving TOI, коридор двух стен, 3-body chain, лимит событий
+- [x] Xvfb/OpenGL изображение CCD on/off и сохранение коридора через Scene JSON
+
+## v2.4 — контакты и инструменты сцены (план)
+- [ ] Точное sphere/AABB corner CCD, CCD динамика-box и sustained high-speed contacts
 - [ ] Persistent contact manifolds, angular dynamics, joints и вращающиеся OBB
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
@@ -193,7 +204,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.4+ — крупные игровые системы (план)
+## v2.5+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
