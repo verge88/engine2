@@ -35,10 +35,25 @@ float inverseAngularInertia(const RigidBodyComponent& body) {
     return 2.5f/(body.mass*body.radius*body.radius);
 }
 
-glm::vec3 contactLeverArm(const RigidBodyComponent& body,
-                          glm::vec3 normal, bool firstBody) {
+glm::vec3 contactLeverArm(
+    const RigidBodyComponent& body, glm::vec3 position,
+    const RigidBodyComponent& other, glm::vec3 otherPosition,
+    glm::vec3 normal, bool firstBody) {
     if (body.shape!=ColliderShape::Sphere) return glm::vec3(0.0f);
-    return normal * (firstBody ? body.radius : -body.radius);
+
+    float direction=firstBody ? 1.0f : -1.0f;
+    if (other.shape==ColliderShape::Box) {
+        const glm::vec3 local=position-otherPosition;
+        const bool centerInside=
+            std::abs(local.x)<=other.halfExtents.x &&
+            std::abs(local.y)<=other.halfExtents.y &&
+            std::abs(local.z)<=other.halfExtents.z;
+        // sphereBoxContact uses a correction normal when the sphere center is
+        // inside/on the AABB. The physical sphere contact point is then on
+        // the opposite side of that normal.
+        if (centerInside) direction=-direction;
+    }
+    return normal*(direction*body.radius);
 }
 
 } // namespace
@@ -480,8 +495,10 @@ void Scene::fixedStep() {
             solveContactImpulseAngular(
                 va,wa,vb,wb,invA,invB,
                 inverseAngularInertia(a),inverseAngularInertia(b),
-                contactLeverArm(a,earliest->normal,true),
-                contactLeverArm(b,earliest->normal,false),
+                contactLeverArm(
+                    a,first.position,b,second.position,earliest->normal,true),
+                contactLeverArm(
+                    b,second.position,a,first.position,earliest->normal,false),
                 earliest->normal,
                 {a.restitution,a.staticFriction,a.dynamicFriction},
                 {b.restitution,b.staticFriction,b.dynamicFriction},
@@ -607,8 +624,10 @@ void Scene::fixedStep() {
                 ? glm::vec3(0.0f) : b.angularVelocity;
             const float invInertiaA=inverseAngularInertia(a);
             const float invInertiaB=inverseAngularInertia(b);
-            const glm::vec3 leverA=contactLeverArm(a,contact.normal,true);
-            const glm::vec3 leverB=contactLeverArm(b,contact.normal,false);
+            const glm::vec3 leverA=contactLeverArm(
+                a,first.position,b,second.position,contact.normal,true);
+            const glm::vec3 leverB=contactLeverArm(
+                b,second.position,a,first.position,contact.normal,false);
 
             if (pass==0 && c.hasCached &&
                 glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment) {
