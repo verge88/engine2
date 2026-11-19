@@ -1,6 +1,8 @@
 #include "engine2/Scene.hpp"
 
 #include <glm/common.hpp>
+#include <glm/geometric.hpp>
+#include <glm/vec4.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <algorithm>
@@ -178,6 +180,7 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
         throw std::invalid_argument("Rigid bodies must be root entities");
     if (!finite(body.velocity) || !std::isfinite(body.radius) ||
         !std::isfinite(body.groundHeight) || !std::isfinite(body.restitution) ||
+        !std::isfinite(body.mass) || body.mass <= 0.0f ||
         body.radius <= 0.0f || body.restitution < 0.0f || body.restitution > 1.0f)
         throw std::invalid_argument("Invalid rigid body parameters");
     slot.body = body;
@@ -221,6 +224,8 @@ std::vector<PointLight> Scene::pointLights() const {
 SceneStats Scene::stats() const {
     SceneStats result;
     result.fixedSteps = totalSteps_;
+    result.broadphasePairs = broadphasePairs_;
+    result.sphereContacts = sphereContacts_;
     for (const Slot& slot : slots_) {
         if (!slot.alive) continue;
         ++result.entities;
@@ -232,24 +237,126 @@ SceneStats Scene::stats() const {
 }
 
 void Scene::fixedStep() {
-    for (Slot& slot : slots_) {
+    struct Candidate {
+        std::uint32_t slot;
+        glm::vec3 position;
+        float radius;
+        float minX;
+        float maxX;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(slots_.size());
+
+    // Semi-implicit Euler: integrate velocity first, then translate. Fixed
+    // 60 Hz makes frame grouping deterministic. Static spheres are infinite-
+    // mass obstacles and never move in response to contacts.
+    for (std::size_t i = 0; i < slots_.size(); ++i) {
+        Slot& slot = slots_[i];
         if (!slot.alive || !slot.enabled || !slot.body) continue;
         RigidBodyComponent& body = *slot.body;
-        if (body.gravity)
-            body.velocity.y -= 9.81f * fixedDeltaSeconds;
-
         glm::vec3 position(slot.local[3]);
-        position += body.velocity * fixedDeltaSeconds;
+        if (!body.isStatic) {
+            if (body.gravity)
+                body.velocity.y -= 9.81f * fixedDeltaSeconds;
+            position += body.velocity * fixedDeltaSeconds;
 
+            const float minimumY = body.groundHeight + body.radius;
+            if (position.y < minimumY) {
+                position.y = minimumY;
+                if (body.velocity.y < 0.0f) {
+                    body.velocity.y = -body.velocity.y * body.restitution;
+                    if (body.velocity.y < 0.25f) body.velocity.y = 0.0f;
+                }
+            }
+            slot.local[3] = glm::vec4(position, 1.0f);
+        }
+        candidates.push_back({
+            static_cast<std::uint32_t>(i), position, body.radius,
+            position.x - body.radius, position.x + body.radius
+        });
+    }
+
+    // Sweep-and-prune broadphase: only x-interval overlaps reach the
+    // remaining y/z and narrowphase tests. Sort by x, then entity slot for a
+    // deterministic order, even if the same positions are repeated.
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) {
+                  if (a.minX != b.minX) return a.minX < b.minX;
+                  return a.slot < b.slot;
+              });
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        Candidate& first = candidates[i];
+        for (std::size_t j = i + 1; j < candidates.size(); ++j) {
+            Candidate& second = candidates[j];
+            if (second.minX > first.maxX) break;
+            Slot& aSlot = slots_[first.slot];
+            Slot& bSlot = slots_[second.slot];
+            RigidBodyComponent& a = *aSlot.body;
+            RigidBodyComponent& b = *bSlot.body;
+            if (a.isStatic && b.isStatic) continue;
+            ++broadphasePairs_;
+
+            const float combinedRadius = a.radius + b.radius;
+            const glm::vec3 delta = second.position - first.position;
+            if (std::abs(delta.y) >= combinedRadius ||
+                std::abs(delta.z) >= combinedRadius) continue;
+            const float distanceSquared = glm::dot(delta, delta);
+            if (distanceSquared >= combinedRadius * combinedRadius) continue;
+            ++sphereContacts_;
+
+            // Fully coincident centers are possible when loading a scene.
+            // Choose a stable axis for the separation instead of dividing 0/0.
+            const float distance = std::sqrt(distanceSquared);
+            const glm::vec3 normal =
+                distance > 1.0e-6f ? delta / distance
+                                   : glm::vec3(1.0f, 0.0f, 0.0f);
+            const float inverseA = a.isStatic ? 0.0f : 1.0f / a.mass;
+            const float inverseB = b.isStatic ? 0.0f : 1.0f / b.mass;
+            const float totalInverseMass = inverseA + inverseB;
+            if (totalInverseMass <= 0.0f) continue;
+
+            // Resolve the actual overlap, mass-weighted, before applying the
+            // collision impulse. Keep an explicit 0.0001f slop to avoid
+            // non-stop micro-corrections caused by float rounding.
+            const float penetration = combinedRadius - distance;
+            const float correction =
+                std::max(penetration - 0.0001f, 0.0f) / totalInverseMass;
+            first.position -= normal * correction * inverseA;
+            second.position += normal * correction * inverseB;
+
+            const glm::vec3 relativeVelocity =
+                (b.isStatic ? glm::vec3(0.0f) : b.velocity) -
+                (a.isStatic ? glm::vec3(0.0f) : a.velocity);
+            const float closingSpeed = glm::dot(relativeVelocity, normal);
+            if (closingSpeed < 0.0f) {
+                const float restitution = std::min(a.restitution, b.restitution);
+                const float impulseMagnitude =
+                    -(1.0f + restitution) * closingSpeed / totalInverseMass;
+                const glm::vec3 impulse = impulseMagnitude * normal;
+                if (!a.isStatic) a.velocity -= impulse * inverseA;
+                if (!b.isStatic) b.velocity += impulse * inverseB;
+            }
+            // Keep candidate centers synchronized with the correction. The
+            // broadphase order is still based on pre-correction intervals.
+            if (!a.isStatic) aSlot.local[3] = glm::vec4(first.position, 1.0f);
+            if (!b.isStatic) bSlot.local[3] = glm::vec4(second.position, 1.0f);
+        }
+    }
+
+    // Sphere separation may push a body below its ground plane. Project it
+    // back above the plane after contact resolution to avoid floor tunneling.
+    for (const Candidate& candidate : candidates) {
+        Slot& slot = slots_[candidate.slot];
+        RigidBodyComponent& body = *slot.body;
+        if (body.isStatic) continue;
+        glm::vec3 position(slot.local[3]);
         const float minimumY = body.groundHeight + body.radius;
         if (position.y < minimumY) {
             position.y = minimumY;
-            if (body.velocity.y < 0.0f) {
-                body.velocity.y = -body.velocity.y * body.restitution;
-                if (body.velocity.y < 0.25f) body.velocity.y = 0.0f;
-            }
+            if (body.velocity.y < 0.0f) body.velocity.y = 0.0f;
+            slot.local[3] = glm::vec4(position, 1.0f);
         }
-        slot.local[3] = glm::vec4(position, 1.0f);
     }
     ++totalSteps_;
 }

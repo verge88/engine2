@@ -35,15 +35,17 @@ struct MeshRendererComponent {
     Material material{};
 };
 
-// A first, deliberately limited, physics building block: unparented bodies
-// integrate gravity on a fixed timestep and collide with a horizontal plane.
-// Full rigid-body/world collisions and a broadphase are later milestones.
+// Unparented sphere collider with translation-only Newtonian response.
+// Collision radius is explicitly in world units (independent of mesh scale).
+// Static bodies have infinite mass and are moved by game code, not simulation.
 struct RigidBodyComponent {
     glm::vec3 velocity{0.0f};
     bool gravity = true;
     float radius = 0.5f;          // world-space approximate bounding sphere
     float groundHeight = -1.0f;  // world-space collision plane
     float restitution = 0.35f;   // 0: no bounce, 1: full elastic bounce
+    float mass = 1.0f;           // kilograms, strictly positive for dynamics
+    bool isStatic = false;       // infinite mass, no integration
 };
 
 struct SceneStats {
@@ -52,11 +54,14 @@ struct SceneStats {
     std::size_t pointLights = 0;
     std::size_t rigidBodies = 0;
     std::uint64_t fixedSteps = 0;
+    std::uint64_t broadphasePairs = 0; // accumulated x-axis overlap candidates
+    std::uint64_t sphereContacts = 0;  // accumulated resolved sphere contacts
 };
 
 // A small runtime object/component world rather than a data-oriented archetype
 // ECS. Supports parent-child transforms, renderers, lights and fixed-step
-// rigid-body motion; independent of a GL context until Mesh::draw().
+// rigid-body motion with sweep-and-prune sphere contacts; independent of
+// a GL context until Mesh::draw().
 class Scene {
 public:
     static constexpr float fixedDeltaSeconds = 1.0f / 60.0f;
@@ -111,6 +116,8 @@ private:
     std::vector<std::uint32_t> freeSlots_;
     double accumulator_ = 0.0;
     std::uint64_t totalSteps_ = 0;
+    std::uint64_t broadphasePairs_ = 0;
+    std::uint64_t sphereContacts_ = 0;
 };
 
 } // namespace engine2
