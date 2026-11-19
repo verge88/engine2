@@ -27,6 +27,22 @@ struct ContactImpulseState {
     bool initialized = false;
 };
 
+inline void warmStartContactImpulse(
+    glm::vec3& velocityA, glm::vec3& velocityB,
+    float invMassA, float invMassB, glm::vec3 normal,
+    ContactImpulseState& state) {
+
+    if (!state.initialized || state.accumulatedNormal <= 0.0f) return;
+    const glm::vec3 tangent =
+        state.accumulatedTangent -
+        glm::dot(state.accumulatedTangent,normal) * normal;
+    state.accumulatedTangent = tangent;
+    const glm::vec3 impulse =
+        state.accumulatedNormal * normal + tangent;
+    velocityA -= impulse * invMassA;
+    velocityB += impulse * invMassB;
+}
+
 inline void solveContactImpulse(
     glm::vec3& velocityA, glm::vec3& velocityB,
     float invMassA, float invMassB, glm::vec3 normal,
