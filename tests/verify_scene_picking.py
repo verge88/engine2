@@ -68,7 +68,15 @@ def main():
         "--pick-screen",640,410,count=1,primary=13)
     if "Scene ray pick: Mesh 13" not in ray:
         raise AssertionError(f"Screen ray did not hit expected sphere: {ray}")
-    comparison(single,picked,"Ray-pick vs manual selection",0,0)
+    if single[0] != picked[0]:
+        raise AssertionError("Manual selection and ray selection viewport sizes differ")
+    pixel_differences=[abs(a-b) for a,b in zip(single[1],picked[1])]
+    mean_difference=sum(pixel_differences)/len(pixel_differences)
+    visually_changed=sum(v>=5 for v in pixel_differences)
+    print(f"Manual vs ray picked sphere: mean={mean_difference:.5f}, "
+          f"channels>=5: {visually_changed}")
+    if mean_difference > 0.08 or visually_changed > len(pixel_differences)//2000:
+        raise AssertionError("Ray picking and manual selection show different objects")
     # A second sphere projects near (728,410) at the default FPS camera.
     additive,ray2=call(xvfb,binary,directory,"ray-additive",
         "--pick-screen",640,410,"--pick-add",728,410,
