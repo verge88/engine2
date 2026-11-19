@@ -99,6 +99,8 @@ struct Arguments {
     bool physicsDemo = false;
     bool collisionDemo = false;
     bool boxDemo = false;
+    std::optional<bool> demoCcd;
+    std::optional<float> demoCcdSpeed;
     std::optional<float> simulationDelta;
     bool stats = false;
     bool help = false;
@@ -164,6 +166,13 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--box-demo requires 0 or 1");
             args.boxDemo = value != 0.0f;
+        } else if (arg == "--ccd" && i + 1 < argc) {
+            const float value=parseSetting(argv[++i],"--ccd",0.0f,1.0f);
+            if (value!=std::floor(value))
+                throw std::invalid_argument("--ccd requires 0 or 1");
+            args.demoCcd=value!=0.0f;
+        } else if (arg == "--ccd-speed" && i + 1 < argc) {
+            args.demoCcdSpeed=parseSetting(argv[++i],"--ccd-speed",0.0f,10000.0f);
         } else if (arg == "--sim-dt" && i + 1 < argc) {
             args.simulationDelta = parseSetting(argv[++i], "--sim-dt", 0.0f, 0.25f);
         } else if (arg == "--lights" && i + 1 < argc) {
@@ -378,6 +387,7 @@ int run(int argc, char** argv) {
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
                      "               [--physics-demo 0|1] [--collision-demo 0|1] [--box-demo 0|1]\n"
+                     "               [--ccd 0|1] [--ccd-speed 0..10000] (requires --box-demo 1)\n"
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
@@ -395,6 +405,8 @@ int run(int argc, char** argv) {
 
     if ((args.physicsDemo || args.collisionDemo || args.boxDemo) && args.model)
         throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
+    if ((args.demoCcd || args.demoCcdSpeed) && !args.boxDemo)
+        throw std::invalid_argument("--ccd and --ccd-speed require --box-demo 1");
     if (args.loadScene && (args.physicsDemo || args.collisionDemo || args.boxDemo))
         throw std::invalid_argument("--load-scene cannot be combined with physics/collision demos");
 
@@ -580,7 +592,9 @@ int run(int argc, char** argv) {
         sphereBody.radius = 0.45f;
         sphereBody.gravity = false;
         sphereBody.restitution = 0.85f;
-        sphereBody.velocity = glm::vec3(3.2f, 0.0f, 0.0f);
+        sphereBody.continuous=args.demoCcd.value_or(false);
+        sphereBody.velocity = glm::vec3(
+            args.demoCcdSpeed.value_or(3.2f), 0.0f, 0.0f);
         world.setRigidBody(handles[1], sphereBody);
         boxDemoEntities = handles;
     }
@@ -786,6 +800,9 @@ int run(int argc, char** argv) {
                   << " sceneBodies=" << sceneStats.rigidBodies
                   << " sceneFixedSteps=" << sceneStats.fixedSteps
                   << " sceneBroadphasePairs=" << sceneStats.broadphasePairs
+                  << " sceneBroadphaseCells=" << sceneStats.broadphaseCells
+                  << " sceneBroadphaseTests=" << sceneStats.broadphaseTests
+                  << " sceneCcdHits=" << sceneStats.ccdHits
                   << " sceneSphereContacts=" << sceneStats.sphereContacts
                   << " sceneBoxContacts=" << sceneStats.boxContacts
                   << " sceneSolverPasses=" << sceneStats.solverPasses;

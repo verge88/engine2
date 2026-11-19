@@ -427,6 +427,15 @@ void SceneGui::drawProperties(Scene& scene) {
             });
             edited_=true;
         }
+        bool continuous=scene.rigidBodyComponent(entity)->continuous;
+        if (ImGui::Checkbox("CCD (sphere vs static)",&continuous)) {
+            history_.perform(scene,[&](Scene& working) {
+                auto modified=*working.rigidBodyComponent(entity);
+                modified.continuous=continuous;
+                working.setRigidBody(entity,modified);
+            });
+            edited_=true;
+        }
         bool isStatic=scene.rigidBodyComponent(entity)->isStatic;
         if (ImGui::Checkbox("Static",&isStatic)) {
             history_.perform(scene,[&](Scene& working) {

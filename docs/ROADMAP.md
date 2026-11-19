@@ -172,9 +172,20 @@
 - [x] Dear ImGui, CLI JSON-патч set-body-friction, инспекция и физическая статистика
 - [x] Unit-тесты normal/tangent impulses, stacks, JSON; Xvfb/OpenGL сравнение кадров
 
-## v2.2 — развитие физики и редактора (план)
-- [ ] 3D broadphase (пространственная сетка или BVH по телам), CCD, устойчивые долгоживущие manifolds
-- [ ] Angular dynamics, moments of inertia, rotated OBB and joints/constraints
+## v2.2 — 3D broadphase и ограниченное CCD (готово)
+- [x] Uniform 3D spatial grid с swept AABB для потенциальных контактов
+- [x] Устойчивый порядок 3D-кандидатов, дедупликация пар и исключение static/static
+- [x] Fallback для огромных коллайдеров без создания миллионов ячеек
+- [x] Opt-in CCD для динамической сферы против статической сферы (аналитический TOI)
+- [x] Swept sphere vs static AABB с консервативным пересечением расширенной коробки
+- [x] Импульс в момент первого контакта и остаточное движение в том же fixed step
+- [x] Scene JSON (необязательный continuous), Dear ImGui, CLI-редактор set-body-ccd
+- [x] Демонстрационные --ccd и --ccd-speed, telemetry cells/tests/CCD hits
+- [x] CPU-тесты 3D-сетки и CCD + headless OpenGL image regression
+
+## v2.3 — игровая физика и редактор (план)
+- [ ] Многократные CCD-удары за шаг, continuous dynamic/dynamic и точное corner CCD
+- [ ] Persistent contact manifolds, angular dynamics, joints и вращающиеся OBB
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
@@ -182,7 +193,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.3+ — крупные игровые системы (план)
+## v2.4+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
