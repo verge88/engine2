@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.9.0 LANGUAGES C CXX)
+project(engine2 VERSION 2.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -169,6 +169,13 @@ if(BUILD_TESTING)
     add_executable(engine2_triangle_marquee_tests tests/triangle_marquee_test.cpp)
     target_link_libraries(engine2_triangle_marquee_tests PRIVATE engine2_core)
     add_test(NAME triangle-marquee-unit COMMAND engine2_triangle_marquee_tests)
+    # Stable operation-count benchmark: BVH must match brute-force results
+    # while visiting <1/50 of triangles on a dense 32k triangle grid.
+    add_executable(engine2_triangle_bvh_tests tests/triangle_bvh_test.cpp)
+    target_include_directories(engine2_triangle_bvh_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_triangle_bvh_tests PRIVATE glm::glm)
+    add_test(NAME triangle-bvh-acceleration-unit COMMAND engine2_triangle_bvh_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -374,6 +381,17 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/triangle-picking-gap.gltf")
         set_tests_properties(precise-triangle-marquee-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # A real GPU scene tests selection identity with BVH, compares the
+        # editor viewport to bounds-mode and verifies per-ray traversal
+        # counters are significantly below brute force.
+        add_test(NAME triangle-bvh-runtime-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_bvh_picking.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/triangle-picking-gap.gltf")
+        set_tests_properties(triangle-bvh-runtime-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 

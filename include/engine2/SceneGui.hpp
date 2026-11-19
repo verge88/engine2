@@ -44,6 +44,9 @@ public:
                                  bool additive = false);
     [[nodiscard]] std::size_t selectedCount() const { return selection_.size(); }
     [[nodiscard]] Entity selectedEntity() const { return selected_; }
+    [[nodiscard]] const TriangleBVHStats& lastPickStats() const {
+        return lastPickStats_;
+    }
     void setGizmoEnabled(bool enabled) { gizmoEnabled_ = enabled; }
     [[nodiscard]] bool gizmoEnabled() const { return gizmoEnabled_; }
     void setGizmoMode(GizmoMode mode) {
@@ -80,6 +83,7 @@ private:
     SceneSelection selection_{};
     bool gizmoHovering_ = false;
     bool precisePicking_ = true;
+    TriangleBVHStats lastPickStats_{};
     std::optional<glm::vec2> marqueeStart_;
     glm::vec2 marqueeCurrent_{0.0f};
     bool marqueeAdditive_ = false;

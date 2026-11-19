@@ -152,16 +152,26 @@
 - [x] CLI --marquee-screen/--marquee-add и JSON glTF fixture с ложным AABB попаданием
 - [x] CPU triangle/rectangle math + headless GL image regression
 
-## v2.0 — производительность редактора и физика (план)
-- [ ] BVH для крупных мешей, alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
-- [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
+## v2.0 — ускорение точного выбора через BVH (готово)
+- [x] Median-split BVH по локальным центроидам треугольников, построение один раз на Mesh
+- [x] Ближний-к-дальнему обход + отсечение по ближайшей дистанции hit
+- [x] Местные raycasts учитывают масштаб и поворот через inverse model matrix
+- [x] Корректный перенос BVH при Mesh move construction / assignment
+- [x] Инструментация: число AABB-тестов, посещённых узлов, проверенных треугольников
+- [x] Dear ImGui и --stats показывают число проверенных треугольников последнего ray-pick
+- [x] Тест эквивалентности с полным перебором на 32,768-треугольной сетке, порог 50× по числу проверок
+- [x] End-to-end Xvfb/OpenGL тест на procedural sphere и glTF triangle-gap
+
+## v2.1 — улучшение физики и инструменты сцены (план)
+- [ ] 3D broadphase и трение, iterative contact solver/CCD для устойчивой физики
+- [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
 - [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v2.1+ — крупные игровые системы (план)
+## v2.2+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

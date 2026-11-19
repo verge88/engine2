@@ -125,8 +125,10 @@ Entity SceneGui::pickAt(Scene& scene, const Camera& camera,
                          camera.viewMatrix();
     const auto ray = viewportPickRay(vp,pixel,viewport);
     if (!ray) throw std::invalid_argument("Scene picking pixel is outside viewport");
-    const auto hit = precisePicking_ ? pickSceneTriangles(scene,*ray)
-                                     : pickSceneBounds(scene,*ray);
+    lastPickStats_ = {};
+    const auto hit = precisePicking_
+        ? pickSceneTriangles(scene,*ray,&lastPickStats_)
+        : pickSceneBounds(scene,*ray);
     select(scene,hit ? hit->entity : Entity{},additive);
     return hit ? hit->entity : Entity{};
 }
@@ -690,6 +692,9 @@ void SceneGui::draw(Scene& scene, const SceneAssetRegistry& assets,
         ImGui::TextDisabled("Click: select | Ctrl/Shift+click: toggle");
         ImGui::TextDisabled("Drag empty viewport: rectangular selection");
         ImGui::Checkbox("Precise triangle picking",&precisePicking_);
+        ImGui::TextDisabled("Last pick: %llu BVH nodes, %llu triangles",
+            static_cast<unsigned long long>(lastPickStats_.nodesVisited),
+            static_cast<unsigned long long>(lastPickStats_.trianglesTested));
         ImGui::Text("Selected: %zu   Primary: %s",selection_.size(),
                     scene.contains(selected_) ? scene.name(selected_).c_str() : "(none)");
         ImGui::TextDisabled("F1: camera   Move / Rotate / Scale X,Y,Z");
