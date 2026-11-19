@@ -84,6 +84,7 @@ add_library(engine2_core STATIC
     src/Scene.cpp
     src/SceneIO.cpp
     src/SceneInspector.cpp
+    src/ArenaGame.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -228,6 +229,11 @@ if(BUILD_TESTING)
     target_link_libraries(engine2_angular_contact_tests PRIVATE engine2_core)
     add_test(NAME sphere-angular-contact-torque-unit
              COMMAND engine2_angular_contact_tests)
+
+    add_executable(engine2_arena_game_tests tests/arena_game_test.cpp)
+    target_link_libraries(engine2_arena_game_tests PRIVATE engine2_core)
+    add_test(NAME orb-arena-gameplay-unit
+             COMMAND engine2_arena_game_tests)
     add_executable(engine2_scene_inspector_tests tests/scene_inspector_test.cpp)
     target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
     target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
@@ -266,6 +272,19 @@ if(BUILD_TESTING AND UNIX)
     if(XVFB_RUN)
         add_test(NAME procedural-smoke
             COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2> --frames 2)
+        add_test(NAME orb-arena-capture
+            COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
+                    --game-demo 1 --gui 0 --frames 2 --sim-dt 0.0166667
+                    --lights 2 --stats
+                    --screenshot "${CMAKE_CURRENT_BINARY_DIR}/orb-arena.ppm")
+        set_tests_properties(orb-arena-capture PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME orb-arena-image-smoke
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_ppm.py"
+                    "${CMAKE_CURRENT_BINARY_DIR}/orb-arena.ppm")
+        set_tests_properties(orb-arena-image-smoke PROPERTIES
+            DEPENDS orb-arena-capture)
         add_test(NAME gltf-hdr-smoke
             COMMAND ${XVFB_RUN} -a $<TARGET_FILE:engine2>
                     --model "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/textured-triangle.gltf"

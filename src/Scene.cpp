@@ -267,6 +267,17 @@ void Scene::setRigidBody(Entity entity, const RigidBodyComponent& body) {
     slot.body = body;
 }
 
+void Scene::setRigidBodyVelocity(Entity entity, glm::vec3 velocity) {
+    if (!finite(velocity))
+        throw std::invalid_argument("Rigid body velocity contains non-finite values");
+    Slot& slot=checked(entity);
+    if (!slot.body)
+        throw std::invalid_argument("Entity has no rigid body component");
+    if (slot.body->isStatic && glm::dot(velocity,velocity)>1.0e-12f)
+        throw std::invalid_argument("Static rigid bodies cannot have velocity");
+    slot.body->velocity=velocity;
+}
+
 const RigidBodyComponent& Scene::rigidBody(Entity entity) const {
     const Slot& slot = checked(entity);
     if (!slot.body)
