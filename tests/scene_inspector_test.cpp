@@ -76,6 +76,9 @@ int main() {
     check(before["entities"][1]["renderer"]["mesh"].is_null(),
           "Null renderer mesh must remain null in inspector");
 
+    check(before["entities"][3]["rigidBody"]["angularVelocity"][0]==0.0f,
+          "Inspector must expose default angular velocity");
+
     const std::string edits=R"json({
       "format":"engine2.scene-edits", "version":1,
       "operations":[
@@ -85,11 +88,13 @@ int main() {
         {"op":"set-enabled","entity":0,"enabled":false},
         {"op":"set-light-intensity","entity":2,"intensity":47.5},
         {"op":"set-body-velocity","entity":3,"velocity":[-2,3.5,1]},
+        {"op":"set-body-angular-velocity","entity":3,
+         "angularVelocity":[0,1.25,-0.5]},
         {"op":"reparent","entity":1,"parent":2,"keepWorld":true},
         {"op":"delete","entity":4}
       ]
     })json";
-    check(applySceneEdits(scene,edits)==8,"Scene editor lost operations");
+    check(applySceneEdits(scene,edits)==9,"Scene editor lost operations");
     check(scene.name(root)=="Edited root" && scene.stats().entities==4 &&
           !scene.contains(doomed),"Rename/delete failed");
     check(scene.parent(child)==light &&
@@ -102,7 +107,9 @@ int main() {
     check(!scene.enabled(root) &&
           near(scene.rendererComponent(child)->material.albedo.y,0.9f) &&
           near(scene.pointLightComponent(light)->intensity,47.5f) &&
-          near(scene.rigidBody(body).velocity.y,3.5f),
+          near(scene.rigidBody(body).velocity.y,3.5f) &&
+          near(scene.rigidBody(body).angularVelocity.y,1.25f) &&
+          near(scene.rigidBody(body).angularVelocity.z,-0.5f),
           "Component or enabled editing failed");
     Json after=Json::parse(inspectScene(scene,assets));
     check(after["entities"].size()==4 &&
@@ -112,7 +119,9 @@ int main() {
           after["entities"][1]["depth"]==1,
           "Inspector did not reflect world hierarchy or inherited visibility");
     check(after["entities"][1]["renderer"]["albedo"][1]==0.9f &&
-          after["entities"][2]["pointLight"]["intensity"]==47.5f,
+          after["entities"][2]["pointLight"]["intensity"]==47.5f &&
+          near(after["entities"][3]["rigidBody"]["angularVelocity"][1].get<float>(),
+               1.25f),
           "Inspector did not include editable component values");
 
     // An invalid operation *after* valid changes must roll back everything.
