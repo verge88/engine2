@@ -69,6 +69,7 @@ struct Arguments {
     int pointLights = 3;
     std::optional<float> fixedLightTime;
     bool physicsDemo = false;
+    bool collisionDemo = false;
     std::optional<float> simulationDelta;
     bool stats = false;
     bool help = false;
@@ -124,6 +125,11 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--physics-demo requires 0 or 1");
             args.physicsDemo = value != 0.0f;
+        } else if (arg == "--collision-demo" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--collision-demo", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--collision-demo requires 0 or 1");
+            args.collisionDemo = value != 0.0f;
         } else if (arg == "--sim-dt" && i + 1 < argc) {
             args.simulationDelta = parseSetting(argv[++i], "--sim-dt", 0.0f, 0.25f);
         } else if (arg == "--lights" && i + 1 < argc) {
@@ -267,15 +273,15 @@ int run(int argc, char** argv) {
                      "               [--ssao 0|1] [--culling 0|1] [--auto-exposure 0|1]\n"
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
-                     "               [--physics-demo 0|1] [--sim-dt 0..0.25]\n"
+                     "               [--physics-demo 0|1] [--collision-demo 0|1] [--sim-dt 0..0.25]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
                      "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
         return 0;
     }
 
-    if (args.physicsDemo && args.model)
-        throw std::invalid_argument("--physics-demo requires procedural scene (without --model)");
+    if ((args.physicsDemo || args.collisionDemo) && args.model)
+        throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
 
     GlfwSession session;
     GLFWwindow* window = session.window();
@@ -358,6 +364,42 @@ int run(int argc, char** argv) {
         body.groundHeight = -1.0f;
         body.restitution = 0.45f;
         world.setRigidBody(*fallingSphere, body);
+    }
+
+    std::optional<std::array<engine2::Entity, 2>> collisionBalls;
+    if (args.collisionDemo) {
+        // Two isolated dynamic sphere colliders: same mesh resource, different
+        // materials, masses and components. They head toward one another and
+        // rebound at the same fixed rate regardless of rendering FPS.
+        std::array<engine2::Entity, 2> handles{};
+        for (int i = 0; i < 2; ++i) {
+            const bool left = i == 0;
+            handles[static_cast<std::size_t>(i)] =
+                world.createEntity(left ? "Collision Red" : "Collision Blue");
+            const glm::vec3 center(left ? -1.35f : 1.35f,
+                                   1.15f, 1.5f);
+            glm::mat4 transform =
+                glm::translate(glm::mat4(1.0f), center);
+            transform = glm::scale(transform, glm::vec3(0.55f));
+            world.setLocalTransform(handles[static_cast<std::size_t>(i)],
+                                    transform);
+
+            engine2::Material material;
+            material.albedo = left ? glm::vec3(0.94f, 0.16f, 0.13f)
+                                   : glm::vec3(0.09f, 0.43f, 0.98f);
+            material.metallic = 0.15f;
+            material.roughness = 0.29f;
+            world.setRenderer(handles[static_cast<std::size_t>(i)],
+                              {sphere.get(), material});
+            engine2::RigidBodyComponent body;
+            body.gravity = false;
+            body.radius = 0.55f;
+            body.mass = 1.0f;
+            body.restitution = 0.92f;
+            body.velocity = glm::vec3(left ? 2.5f : -2.5f, 0.0f, 0.0f);
+            world.setRigidBody(handles[static_cast<std::size_t>(i)], body);
+        }
+        collisionBalls = handles;
     }
 
     double lastTime = glfwGetTime();
@@ -466,9 +508,20 @@ int run(int argc, char** argv) {
                   << " sceneRenderables=" << sceneStats.renderables
                   << " sceneLights=" << sceneStats.pointLights
                   << " sceneBodies=" << sceneStats.rigidBodies
-                  << " sceneFixedSteps=" << sceneStats.fixedSteps;
+                  << " sceneFixedSteps=" << sceneStats.fixedSteps
+                  << " sceneBroadphasePairs=" << sceneStats.broadphasePairs
+                  << " sceneSphereContacts=" << sceneStats.sphereContacts;
         if (fallingSphere) {
             std::cout << " physicsY=" << world.worldTransform(*fallingSphere)[3][1];
+        }
+        if (collisionBalls) {
+            const auto& a = (*collisionBalls)[0];
+            const auto& b = (*collisionBalls)[1];
+            std::cout << " collisionSeparation="
+                      << world.worldTransform(b)[3][0] -
+                         world.worldTransform(a)[3][0]
+                      << " collisionVelocityA=" << world.rigidBody(a).velocity.x
+                      << " collisionVelocityB=" << world.rigidBody(b).velocity.x;
         }
         std::cout << '\n';
     }

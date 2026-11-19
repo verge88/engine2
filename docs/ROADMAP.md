@@ -71,15 +71,23 @@
 - [x] Интеграция procedural и glTF геометрии/освещения с Scene
 - [x] CLI physics demo, --sim-dt, SceneStats, unit- и visual-тесты
 
-## v1.1 — расширение игровых систем и производительность (план)
+## v1.1 — столкновения физических сфер (готово)
+- [x] Sweep-and-prune broadphase по оси X вместо проверки всех пар O(N²)
+- [x] Narrowphase sphere-vs-sphere с разрешением проникновения
+- [x] Закон импульса с учётом масс и коэффициента восстановления
+- [x] Статические сферические коллайдеры и безопасная обработка одинаковых центров
+- [x] Статистика потенциальных пар и подтверждённых контактов
+- [x] CLI collision demo, unit tests равных/разных масс и OpenGL image regression
+
+## v1.2 — расширение игровых систем (план)
+- [ ] 3D broadphase / capsule/box colliders, трение, итерационный решатель, CCD
+- [ ] Сохранение/загрузка Scene в JSON и инструмент инспектора сущностей
 - [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
-- [ ] Настоящий broadphase, shape colliders, контакты между объектами
-- [ ] Motion vectors объектов и улучшение TAA для движущихся мешей
-- [ ] Scene serialization и небольшой редактор/inspector
+- [ ] Motion vectors объектов и улучшение TAA
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions, async exposure readback
 
-## v1.2+ — крупные игровые системы (план)
+## v1.3+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

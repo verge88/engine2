@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.0.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -111,6 +111,9 @@ if(BUILD_TESTING)
     add_executable(engine2_scene_tests tests/scene_test.cpp)
     target_link_libraries(engine2_scene_tests PRIVATE engine2_core)
     add_test(NAME scene-entities-physics-unit COMMAND engine2_scene_tests)
+    add_executable(engine2_sphere_collision_tests tests/sphere_collision_test.cpp)
+    target_link_libraries(engine2_sphere_collision_tests PRIVATE engine2_core)
+    add_test(NAME sphere-collision-unit COMMAND engine2_sphere_collision_tests)
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -238,6 +241,15 @@ if(BUILD_TESTING AND UNIX)
                     "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(scene-physics-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Collision broadphase + impulses must affect both numerical physics
+        # telemetry and the pixels in a real headless OpenGL frame.
+        add_test(NAME sphere-collision-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_collisions.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(sphere-collision-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 
