@@ -39,21 +39,10 @@ glm::vec3 contactLeverArm(
     const RigidBodyComponent& body, glm::vec3 position,
     const RigidBodyComponent& other, glm::vec3 otherPosition,
     glm::vec3 normal, bool firstBody) {
-    if (body.shape!=ColliderShape::Sphere) return glm::vec3(0.0f);
-
-    float direction=firstBody ? 1.0f : -1.0f;
-    if (other.shape==ColliderShape::Box) {
-        const glm::vec3 local=position-otherPosition;
-        const bool centerInside=
-            std::abs(local.x)<=other.halfExtents.x &&
-            std::abs(local.y)<=other.halfExtents.y &&
-            std::abs(local.z)<=other.halfExtents.z;
-        // sphereBoxContact uses a correction normal when the sphere center is
-        // inside/on the AABB. The physical sphere contact point is then on
-        // the opposite side of that normal.
-        if (centerInside) direction=-direction;
-    }
-    return normal*(direction*body.radius);
+    return colliderContactLeverArm(
+        {body.shape,body.radius,body.halfExtents},position,
+        {other.shape,other.radius,other.halfExtents},otherPosition,
+        normal,firstBody);
 }
 
 } // namespace
