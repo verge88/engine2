@@ -271,6 +271,8 @@ SceneStats Scene::stats() const {
     result.broadphaseCells = broadphaseCells_;
     result.broadphaseTests = broadphaseTests_;
     result.ccdHits = ccdHits_;
+    result.ccdDynamicHits = ccdDynamicHits_;
+    result.ccdBudgetExhaustions = ccdBudgetExhaustions_;
     result.sphereContacts = sphereContacts_;
     result.boxContacts = boxContacts_;
     result.solverPasses = solverPasses_;
@@ -339,58 +341,146 @@ void Scene::fixedStep() {
     broadphaseCells_+=broadphase.occupiedCells;
     broadphaseTests_+=broadphase.candidateTests;
 
-    // Optional, single-impact CCD for dynamic spheres vs static primitives.
-    // This occurs before the iterative discrete solver; a body's earliest
-    // impact is resolved first, then the residual portion of the fixed step
-    // is travelled with its new velocity. Dynamic/dynamic CCD and successive
-    // CCD impacts within one step are intentionally not yet implemented.
+    // Event-driven continuous collision detection. Only opt-in dynamic
+    // spheres advance on the CCD timeline. Targets are static sphere/AABBs,
+    // or another opt-in moving sphere. Other dynamic shapes remain discrete.
+    // Rebuild swept 3D pairs after EVERY impact, because bouncing can send a
+    // sphere towards a wall entirely outside its original swept AABB.
+    std::vector<std::size_t> ccdActors;
+    std::vector<std::size_t> ccdObjects;
     for (std::size_t i=0;i<candidates.size();++i) {
-        Candidate& moving=candidates[i];
-        RigidBodyComponent& body=*slots_[moving.slot].body;
-        if (body.isStatic || !body.continuous ||
-            body.shape!=ColliderShape::Sphere) continue;
-        std::optional<SweptSphereHit> earliest;
-        std::size_t obstacleIndex=0;
-        for (const auto& [first,second] : broadphase.pairs) {
-            const std::size_t other=first==i ? second :
-                                    second==i ? first : candidates.size();
-            if (other==candidates.size()) continue;
-            const Candidate& obstacle=candidates[other];
-            const RigidBodyComponent& fixed=*slots_[obstacle.slot].body;
-            if (!fixed.isStatic) continue;
-            const auto hit=sweepSphereStatic(
-                moving.start,moving.position,body.radius,
-                {fixed.shape,fixed.radius,fixed.halfExtents},
-                obstacle.position);
-            if (hit && (!earliest || hit->fraction<earliest->fraction)) {
-                earliest=hit;
-                obstacleIndex=other;
+        const RigidBodyComponent& body=*slots_[candidates[i].slot].body;
+        const bool actor=!body.isStatic && body.continuous &&
+                         body.shape==ColliderShape::Sphere;
+        if (actor) {
+            ccdActors.push_back(i);
+            candidates[i].position=candidates[i].start;
+        }
+        if (actor || body.isStatic) ccdObjects.push_back(i);
+    }
+
+    if (!ccdActors.empty()) {
+        float remaining=fixedDeltaSeconds;
+        constexpr int maxCcdEvents=12;
+        constexpr float separationEpsilon=0.0002f;
+        int events=0;
+        for (;events<maxCcdEvents && remaining>1.0e-8f;++events) {
+            std::vector<PhysicsBroadphaseProxy> swept;
+            swept.reserve(ccdObjects.size());
+            for (std::size_t index:ccdObjects) {
+                const Candidate& candidate=candidates[index];
+                const RigidBodyComponent& body=*slots_[candidate.slot].body;
+                const glm::vec3 next=body.isStatic
+                    ? candidate.position
+                    : candidate.position+body.velocity*remaining;
+                swept.push_back({
+                    glm::min(candidate.position,next)-candidate.half-glm::vec3(margin),
+                    glm::max(candidate.position,next)+candidate.half+glm::vec3(margin),
+                    body.isStatic
+                });
+            }
+            const PhysicsBroadphaseResult grid=physicsGridBroadphase(swept);
+            broadphasePairs_+=grid.pairs.size();
+            broadphaseCells_+=grid.occupiedCells;
+            broadphaseTests_+=grid.candidateTests;
+
+            std::optional<SweptSphereHit> earliest;
+            std::size_t impactA=0,impactB=0;
+            for (const auto& [localA,localB]:grid.pairs) {
+                const std::size_t ia=ccdObjects[localA];
+                const std::size_t ib=ccdObjects[localB];
+                const Candidate& first=candidates[ia];
+                const Candidate& second=candidates[ib];
+                const RigidBodyComponent& a=*slots_[first.slot].body;
+                const RigidBodyComponent& b=*slots_[second.slot].body;
+                const glm::vec3 endA=first.position+
+                    (a.isStatic ? glm::vec3(0.0f) : a.velocity*remaining);
+                const glm::vec3 endB=second.position+
+                    (b.isStatic ? glm::vec3(0.0f) : b.velocity*remaining);
+                std::optional<SweptSphereHit> hit;
+                if (!a.isStatic && !b.isStatic) {
+                    // Both bodies are guaranteed to be opted-in spheres.
+                    hit=sweepSphereMoving(
+                        first.position,endA,a.radius,
+                        second.position,endB,b.radius);
+                } else if (!a.isStatic) {
+                    hit=sweepSphereStatic(
+                        first.position,endA,a.radius,
+                        {b.shape,b.radius,b.halfExtents},second.position);
+                } else if (!b.isStatic) {
+                    hit=sweepSphereStatic(
+                        second.position,endB,b.radius,
+                        {a.shape,a.radius,a.halfExtents},first.position);
+                    if (hit) hit->normal=-hit->normal;
+                }
+                // Grid pairs are sorted, so exact-time ties use stable order.
+                if (hit && (!earliest ||
+                            hit->fraction<earliest->fraction-1.0e-6f)) {
+                    earliest=hit;
+                    impactA=ia;
+                    impactB=ib;
+                }
+            }
+
+            const float elapsed=earliest
+                ? remaining*earliest->fraction : remaining;
+            for (std::size_t index:ccdActors) {
+                Candidate& actor=candidates[index];
+                const RigidBodyComponent& body=*slots_[actor.slot].body;
+                actor.position+=body.velocity*elapsed;
+            }
+            remaining=std::max(0.0f,remaining-elapsed);
+            if (!earliest) break;
+
+            Candidate& first=candidates[impactA];
+            Candidate& second=candidates[impactB];
+            RigidBodyComponent& a=*slots_[first.slot].body;
+            RigidBodyComponent& b=*slots_[second.slot].body;
+            const float invA=a.isStatic ? 0.0f : 1.0f/a.mass;
+            const float invB=b.isStatic ? 0.0f : 1.0f/b.mass;
+            const float invTotal=invA+invB;
+            glm::vec3 va=a.isStatic ? glm::vec3(0.0f) : a.velocity;
+            glm::vec3 vb=b.isStatic ? glm::vec3(0.0f) : b.velocity;
+            ContactImpulseState impulse;
+            solveContactImpulse(
+                va,vb,invA,invB,earliest->normal,
+                {a.restitution,a.staticFriction,a.dynamicFriction},
+                {b.restitution,b.staticFriction,b.dynamicFriction},
+                impulse);
+            if (!a.isStatic) a.velocity=va;
+            if (!b.isStatic) b.velocity=vb;
+            // Stay just outside the just-hit surface to avoid re-detecting
+            // the same event at fraction zero after a velocity reversal.
+            if (invTotal>0.0f) {
+                first.position-=earliest->normal*
+                    (separationEpsilon*invA/invTotal);
+                second.position+=earliest->normal*
+                    (separationEpsilon*invB/invTotal);
+            }
+            ++ccdHits_;
+            if (!a.isStatic && !b.isStatic) ++ccdDynamicHits_;
+        }
+        // Bound the time spent in a pathological corridor of tiny contacts.
+        // Unsimulated remainder falls back to discrete resolution and is
+        // surfaced via telemetry, not silently frozen.
+        if (remaining>1.0e-8f) {
+            ++ccdBudgetExhaustions_;
+            for (std::size_t index:ccdActors) {
+                Candidate& actor=candidates[index];
+                const RigidBodyComponent& body=*slots_[actor.slot].body;
+                actor.position+=body.velocity*remaining;
             }
         }
-        if (!earliest) continue;
-        const RigidBodyComponent& fixed=*slots_[candidates[obstacleIndex].slot].body;
-        const glm::vec3 displacement=moving.position-moving.start;
-        moving.position=moving.start+displacement*earliest->fraction
-                        -earliest->normal*0.0002f;
-        glm::vec3 velocityA=body.velocity;
-        glm::vec3 stationaryVelocity(0.0f);
-        ContactImpulseState impulse;
-        solveContactImpulse(
-            velocityA,stationaryVelocity,1.0f/body.mass,0.0f,
-            earliest->normal,
-            {body.restitution,body.staticFriction,body.dynamicFriction},
-            {fixed.restitution,fixed.staticFriction,fixed.dynamicFriction},
-            impulse);
-        body.velocity=velocityA;
-        moving.position+=body.velocity*(
-            (1.0f-earliest->fraction)*fixedDeltaSeconds);
-        const float floor=body.groundHeight+moving.half.y;
-        if (moving.position.y<floor) {
-            moving.position.y=floor;
-            solveFloorImpact(body.velocity,
-                {0.0f,body.staticFriction,body.dynamicFriction});
+        for (std::size_t index:ccdActors) {
+            Candidate& actor=candidates[index];
+            RigidBodyComponent& body=*slots_[actor.slot].body;
+            const float floor=body.groundHeight+actor.half.y;
+            if (actor.position.y<floor) {
+                actor.position.y=floor;
+                solveFloorImpact(body.velocity,
+                    {0.0f,body.staticFriction,body.dynamicFriction});
+            }
         }
-        ++ccdHits_;
     }
 
     struct Constraint {
