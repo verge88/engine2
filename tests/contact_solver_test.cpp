@@ -30,6 +30,20 @@ int main() {
           near(bounce.accumulatedNormal,5.4f),
           "Iterative normal impulses must preserve restitution");
 
+    // A persistent resting constraint can re-apply last step's cached
+    // normal/tangent impulse before the iterative solve starts.
+    moving={0,0,0};
+    fixed={0,0,0};
+    ContactImpulseState warm;
+    warm.accumulatedNormal=2.0f;
+    warm.accumulatedTangent={0,0.5f,0};
+    warm.reboundTarget=0.0f;
+    warm.initialized=true;
+    warmStartContactImpulse(moving,fixed,1.0f,0.0f,normal,warm);
+    check(near(moving.x,-2.0f) && near(moving.y,-0.5f) &&
+          near(fixed.x,0.0f),
+          "Warm starting must re-apply cached contact impulses");
+
     // Static friction can cancel the whole tangential closing velocity.
     moving={2,1,0};
     fixed={0,0,0};
