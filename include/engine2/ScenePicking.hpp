@@ -111,7 +111,9 @@ inline std::optional<ScenePickHit> pickSceneBounds(
 // Precise triangle picking uses AABBs only for early rejection. Ordering is
 // by closest triangle intersection, not by closest bounding-box face.
 inline std::optional<ScenePickHit> pickSceneTriangles(
-    const Scene& scene, const PickRay& ray) {
+    const Scene& scene, const PickRay& ray,
+    TriangleBVHStats* totalStats = nullptr) {
+    if (totalStats) *totalStats = {};
     std::optional<ScenePickHit> best;
     for (Entity entity : scene.entities()) {
         if (!pickableVisible(scene,entity)) continue;
@@ -124,9 +126,16 @@ inline std::optional<ScenePickHit> pickSceneTriangles(
         const glm::mat4 inverse = glm::inverse(model);
         const glm::vec3 localOrigin(inverse*glm::vec4(ray.origin,1.0f));
         const glm::vec3 localDirection(inverse*glm::vec4(ray.direction,0.0f));
+        TriangleBVHStats meshStats{};
         const auto fine = renderer->mesh->raycastLocal(
-            localOrigin, localDirection,
-            best ? best->distance : std::numeric_limits<float>::infinity());
+            localOrigin,localDirection,
+            best ? best->distance : std::numeric_limits<float>::infinity(),
+            totalStats ? &meshStats : nullptr);
+        if (totalStats) {
+            totalStats->boundsTests += meshStats.boundsTests;
+            totalStats->nodesVisited += meshStats.nodesVisited;
+            totalStats->trianglesTested += meshStats.trianglesTested;
+        }
         if (fine && (!best || *fine < best->distance - 1.0e-5f))
             best = ScenePickHit{entity,*fine};
     }

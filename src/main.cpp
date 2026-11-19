@@ -774,6 +774,8 @@ int run(int argc, char** argv) {
                   << " editorUndoCount=" << gui.undoCount()
                   << " editorRedoCount=" << gui.redoCount()
                   << " precisePicking=" << (gui.precisePicking() ? 1 : 0)
+                  << " pickBVHNodes=" << gui.lastPickStats().nodesVisited
+                  << " pickTriangles=" << gui.lastPickStats().trianglesTested
                   << " guiSelectedCount=" << gui.selectedCount()
                   << " guiSelectedIndex=" << (gui.selectedEntity()
                       ? static_cast<int>(gui.selectedEntity().index) : -1);

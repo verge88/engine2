@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine2/Frustum.hpp"
+#include "engine2/TriangleBVH.hpp"
 
 #include <glad/gl.h>
 #include <glm/vec2.hpp>
@@ -36,7 +37,13 @@ public:
     // t uses the (possibly unnormalized) input direction's parameterization.
     [[nodiscard]] std::optional<float> raycastLocal(
         const glm::vec3& origin, const glm::vec3& direction,
-        float maximumDistance) const;
+        float maximumDistance, TriangleBVHStats* stats = nullptr) const;
+    [[nodiscard]] std::size_t pickingTriangleCount() const {
+        return pickBvh_.triangleCount();
+    }
+    [[nodiscard]] std::size_t pickingNodeCount() const {
+        return pickBvh_.nodeCount();
+    }
 
     [[nodiscard]] static Mesh sphere(unsigned int sectors = 48, unsigned int stacks = 32);
     [[nodiscard]] static Mesh plane();
@@ -52,6 +59,7 @@ private:
     Bounds bounds_{};
     std::vector<glm::vec3> pickPositions_;
     std::vector<std::uint32_t> pickIndices_;
+    TriangleBVH pickBvh_;
 };
 
 } // namespace engine2

@@ -36,6 +36,7 @@ Mesh::Mesh(std::vector<Vertex> vertices, std::vector<std::uint32_t> indices) {
         if (index >= vertices.size())
             throw std::invalid_argument("Mesh triangle index out of range");
     pickIndices_ = indices;
+    pickBvh_.rebuild(pickPositions_,pickIndices_);
     indexCount_ = static_cast<GLsizei>(indices.size());
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
@@ -77,7 +78,8 @@ Mesh::Mesh(Mesh&& other) noexcept
       indexCount_(std::exchange(other.indexCount_, 0)),
       bounds_(other.bounds_),
       pickPositions_(std::move(other.pickPositions_)),
-      pickIndices_(std::move(other.pickIndices_)) {}
+      pickIndices_(std::move(other.pickIndices_)),
+      pickBvh_(std::move(other.pickBvh_)) {}
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept {
     if (this != &other) {
@@ -89,6 +91,7 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
         bounds_ = other.bounds_;
         pickPositions_ = std::move(other.pickPositions_);
         pickIndices_ = std::move(other.pickIndices_);
+        pickBvh_ = std::move(other.pickBvh_);
     }
     return *this;
 }
@@ -103,9 +106,9 @@ void Mesh::release() noexcept {
 
 std::optional<float> Mesh::raycastLocal(
     const glm::vec3& origin, const glm::vec3& direction,
-    float maximumDistance) const {
-    return intersectPickTriangles(
-        pickPositions_, pickIndices_, origin, direction, maximumDistance);
+    float maximumDistance, TriangleBVHStats* stats) const {
+    return pickBvh_.raycast(
+        pickPositions_,pickIndices_,origin,direction,maximumDistance,stats);
 }
 
 void Mesh::draw() const {
