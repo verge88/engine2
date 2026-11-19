@@ -133,6 +133,49 @@ Mesh Mesh::sphere(unsigned int sectors, unsigned int stacks) {
     return Mesh(std::move(vertices), std::move(indices));
 }
 
+Mesh Mesh::cube() {
+    // Six independent faces keep correct flat normals and tangent axes.
+    // Unit cube centered at the origin, extent +/-0.5 on each axis.
+    const glm::vec3 centers[] = {
+        {0.0f, 0.0f,  0.5f}, {0.0f, 0.0f, -0.5f},
+        {0.0f,  0.5f, 0.0f}, {0.0f, -0.5f, 0.0f},
+        {0.5f, 0.0f, 0.0f}, {-0.5f, 0.0f, 0.0f}
+    };
+    const glm::vec3 normals[] = {
+        {0, 0, 1}, {0, 0, -1},
+        {0, 1, 0}, {0, -1, 0},
+        {1, 0, 0}, {-1, 0, 0}
+    };
+    const glm::vec3 tangents[] = {
+        {1, 0, 0}, {-1, 0, 0}, {1, 0, 0},
+        {1, 0, 0}, {0, 0, -1}, {0, 0, 1}
+    };
+    std::vector<Vertex> vertices;
+    std::vector<std::uint32_t> indices;
+    vertices.reserve(24);
+    indices.reserve(36);
+    for (int face = 0; face < 6; ++face) {
+        const glm::vec3 n = normals[face];
+        const glm::vec3 tangent = tangents[face];
+        const glm::vec3 bitangent = glm::cross(n, tangent);
+        const glm::vec3 c = centers[face];
+        const std::uint32_t start = static_cast<std::uint32_t>(vertices.size());
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) {
+                const glm::vec3 p = c +
+                    (static_cast<float>(x) - 0.5f) * tangent +
+                    (static_cast<float>(y) - 0.5f) * bitangent;
+                vertices.push_back({p, n, {static_cast<float>(x), static_cast<float>(y)},
+                                    {tangent, 1.0f}});
+            }
+        }
+        // Tangent x bitangent = normal, so these are outward-facing.
+        indices.insert(indices.end(), {start, start + 1, start + 2,
+                                        start + 1, start + 3, start + 2});
+    }
+    return Mesh(std::move(vertices), std::move(indices));
+}
+
 Mesh Mesh::plane() {
     const glm::vec3 up(0.0f, 1.0f, 0.0f);
     const glm::vec4 tangent(1.0f, 0.0f, 0.0f, -1.0f);

@@ -88,8 +88,17 @@
 - [x] CLI --save-scene / --load-scene для процедурных и glTF (при повторной загрузке модели)
 - [x] Unit JSON/file roundtrip, invalid-schema/cycle tests и headless pixel regressions
 
-## v1.3 — игровая физика и инструменты (план)
-- [ ] 3D broadphase, capsule/box colliders, трение, итерационный решатель, CCD
+## v1.3 — AABB-коллайдеры и тестовая физическая сцена (готово)
+- [x] ColliderShape Sphere/Box, halfExtents в мировых единицах
+- [x] Narrowphase sphere-vs-box и box-vs-box (грань, угол и случай сферы внутри коробки)
+- [x] Dynamic/static AABB с массой и импульсом отскока
+- [x] Интеграция коробок в sweep-and-prune и столкновения с плоскостью
+- [x] Процедурный cube mesh, --box-demo и sceneBoxContacts
+- [x] JSON backward compatibility: v1.2 файлы без shape/halfExtents
+- [x] Unit/contact/JSON и headless OpenGL screenshot + save/reload проверки
+
+## v1.4 — инструменты сцены и улучшенная физика (план)
+- [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
 - [ ] Редактор/inspector Scene с сохранением и изменением компонентов
 - [ ] Asset-bundle или надёжные внешние asset paths, миграции версий JSON
 - [ ] Связать узлы glTF с родительскими сущностями, анимации и skinning
@@ -97,7 +106,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1 и KHR glTF extensions, async exposure readback
 
-## v1.4+ — крупные игровые системы (план)
+## v1.5+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения

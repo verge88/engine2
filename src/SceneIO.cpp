@@ -151,7 +151,9 @@ Json writeBody(const RigidBodyComponent& body) {
         {"groundHeight", finiteValue(body.groundHeight)},
         {"restitution", finiteValue(body.restitution)},
         {"mass", finiteValue(body.mass)},
-        {"isStatic", body.isStatic}
+        {"isStatic", body.isStatic},
+        {"shape", body.shape == ColliderShape::Box ? "BOX" : "SPHERE"},
+        {"halfExtents", writeVec3(body.halfExtents)}
     };
 }
 
@@ -164,6 +166,16 @@ RigidBodyComponent readBody(const Json& data) {
     result.restitution = finiteFloat(data.at("restitution"));
     result.mass = finiteFloat(data.at("mass"));
     result.isStatic = data.at("isStatic").get<bool>();
+    // Backward compatibility: v1 scenes saved by engine2 v1.2 do not have
+    // shape/halfExtents. A missing shape is a sphere, as before.
+    if (data.contains("shape")) {
+        const std::string shape = data.at("shape").get<std::string>();
+        if (shape == "BOX") result.shape = ColliderShape::Box;
+        else if (shape == "SPHERE") result.shape = ColliderShape::Sphere;
+        else throw std::invalid_argument("Unsupported physics collider shape");
+    }
+    if (data.contains("halfExtents"))
+        result.halfExtents = readVec3(data.at("halfExtents"));
     return result;
 }
 
