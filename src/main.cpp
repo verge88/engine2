@@ -6,6 +6,7 @@
 #include "engine2/SceneIO.hpp"
 #include "engine2/SceneInspector.hpp"
 #include "engine2/SceneGui.hpp"
+#include "engine2/ArenaGame.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -99,6 +100,7 @@ struct Arguments {
     bool physicsDemo = false;
     bool collisionDemo = false;
     bool boxDemo = false;
+    bool gameDemo = false;
     std::optional<bool> demoCcd;
     std::optional<float> demoCcdSpeed;
     std::optional<float> simulationDelta;
@@ -166,6 +168,11 @@ Arguments parseArgs(int argc, char** argv) {
             if (value != std::floor(value))
                 throw std::invalid_argument("--box-demo requires 0 or 1");
             args.boxDemo = value != 0.0f;
+        } else if (arg == "--game-demo" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--game-demo", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--game-demo requires 0 or 1");
+            args.gameDemo = value != 0.0f;
         } else if (arg == "--ccd" && i + 1 < argc) {
             const float value=parseSetting(argv[++i],"--ccd",0.0f,1.0f);
             if (value!=std::floor(value))
@@ -387,6 +394,7 @@ int run(int argc, char** argv) {
                      "               [--exposure X] [--exposure-key 0.02..1] [--exposure-speed 0..12]\n"
                      "               [--bloom 0..2] [--bloom-threshold 0.05..10]\n"
                      "               [--physics-demo 0|1] [--collision-demo 0|1] [--box-demo 0|1]\n"
+                     "               [--game-demo 0|1]  (Orb Arena playable demo)\n"
                      "               [--ccd 0|1] [--ccd-speed 0..10000] (box/collision demo)\n"
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
@@ -398,19 +406,23 @@ int run(int argc, char** argv) {
                      "               [--pick-geometry triangles|bounds]\n"
                      "               [--marquee-screen X0 Y0 X1 Y1] [--marquee-add X0 Y0 X1 Y1]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
-        std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
-                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Ctrl+Z undo, Ctrl+Y redo, Tab cursor, Esc exit.\n";
+        std::cout << "Controls: normal mode: WASD camera, mouse look. Orb Arena: WASD orb, Shift boost, R restart. F1 GUI, Esc exit.\n";
         return 0;
     }
 
-    if ((args.physicsDemo || args.collisionDemo || args.boxDemo) && args.model)
-        throw std::invalid_argument("Physics/collision demos require procedural scene (without --model)");
+    const int demoModes =
+        static_cast<int>(args.physicsDemo) + static_cast<int>(args.collisionDemo) +
+        static_cast<int>(args.boxDemo) + static_cast<int>(args.gameDemo);
+    if (demoModes > 1)
+        throw std::invalid_argument("Choose only one procedural demo mode");
+    if (demoModes != 0 && args.model)
+        throw std::invalid_argument("Procedural demos require running without --model");
     if ((args.demoCcd || args.demoCcdSpeed) &&
         !(args.boxDemo || args.collisionDemo))
         throw std::invalid_argument(
             "--ccd and --ccd-speed require --box-demo 1 or --collision-demo 1");
-    if (args.loadScene && (args.physicsDemo || args.collisionDemo || args.boxDemo))
-        throw std::invalid_argument("--load-scene cannot be combined with physics/collision demos");
+    if (args.loadScene && demoModes != 0)
+        throw std::invalid_argument("--load-scene cannot be combined with procedural demos");
 
     GlfwSession session;
     GLFWwindow* window = session.window();
@@ -467,7 +479,8 @@ int run(int argc, char** argv) {
         assetRegistry.registerMesh("procedural/cube", cube.get());
         assetRegistry.registerMesh("procedural/sphere", sphere.get());
         assetRegistry.registerMesh("procedural/floor", floor.get());
-        initialScene = createScene(*sphere, *floor);
+        if (!args.gameDemo)
+            initialScene = createScene(*sphere, *floor);
     }
 
     // A load replaces the default runtime Scene. The caller must preload the
@@ -555,6 +568,12 @@ int run(int argc, char** argv) {
             world.setRigidBody(handles[static_cast<std::size_t>(i)], body);
         }
         collisionBalls = handles;
+    }
+
+    std::optional<engine2::ArenaGame> arenaGame;
+    if (args.gameDemo) {
+        arenaGame.emplace(world,sphere.get(),cube.get(),floor.get());
+        glfwSetWindowTitle(window,arenaGame->statusText().c_str());
     }
 
     std::optional<std::array<engine2::Entity, 2>> boxDemoEntities;
@@ -656,7 +675,8 @@ int run(int argc, char** argv) {
     gui.setGizmoMode(args.gizmoMode.value_or(engine2::GizmoMode::Translate));
     gui.setSnapping(args.gizmoSnap.value_or(false));
     gui.setGridStep(args.gizmoGridStep.value_or(0.5f));
-    gui.setVisible(args.guiVisible.value_or(!args.frames.has_value()));
+    gui.setVisible(args.guiVisible.value_or(
+        !args.frames.has_value() && !args.gameDemo));
     if (gui.visible() && !args.loadScene && !args.editScene) {
         // Initialize demo light entities now; they remain paused in edit mode.
         const auto lights = animatedLights(
@@ -731,7 +751,24 @@ int run(int argc, char** argv) {
 
         const double now = glfwGetTime();
         const float frameDelta = static_cast<float>(now - lastTime);
-        if (!gui.visible()) camera.update(window, frameDelta);
+        if (!gui.visible()) {
+            if (arenaGame) {
+                engine2::ArenaGameInput input;
+                input.moveX =
+                    (glfwGetKey(window,GLFW_KEY_D)==GLFW_PRESS ? 1.0f : 0.0f) -
+                    (glfwGetKey(window,GLFW_KEY_A)==GLFW_PRESS ? 1.0f : 0.0f);
+                input.moveZ =
+                    (glfwGetKey(window,GLFW_KEY_S)==GLFW_PRESS ? 1.0f : 0.0f) -
+                    (glfwGetKey(window,GLFW_KEY_W)==GLFW_PRESS ? 1.0f : 0.0f);
+                input.boost =
+                    glfwGetKey(window,GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS ||
+                    glfwGetKey(window,GLFW_KEY_RIGHT_SHIFT)==GLFW_PRESS;
+                input.restart=glfwGetKey(window,GLFW_KEY_R)==GLFW_PRESS;
+                arenaGame->applyInput(world,input,frameDelta);
+            } else {
+                camera.update(window,frameDelta);
+            }
+        }
         lastTime = now;
 
         int width = 0;
@@ -752,8 +789,15 @@ int run(int argc, char** argv) {
         }
 
         // The render backend receives only extracted scene components.
-        (void)world.advance(gui.visible() ? 0.0f :
-                            args.simulationDelta.value_or(frameDelta));
+        const float simulationDelta = gui.visible() ? 0.0f :
+            args.simulationDelta.value_or(frameDelta);
+        (void)world.advance(simulationDelta);
+        if (arenaGame && simulationDelta>0.0f) {
+            arenaGame->afterPhysics(world,simulationDelta);
+            const std::string title=
+                std::string("engine2 | ")+arenaGame->statusText();
+            glfwSetWindowTitle(window,title.c_str());
+        }
         renderer.setPointLights(world.pointLights());
         renderer.render(camera, world.renderItems(), width, height, frameDelta);
         // Composite the GUI on the default back buffer BEFORE PPM capture.
@@ -829,6 +873,13 @@ int run(int argc, char** argv) {
                          world.worldTransform(a)[3][0]
                       << " collisionVelocityA=" << world.rigidBody(a).velocity.x
                       << " collisionVelocityB=" << world.rigidBody(b).velocity.x;
+        }
+        if (arenaGame) {
+            const auto& game=arenaGame->stats();
+            std::cout << " gameScore=" << game.score
+                      << " gameTarget=" << game.targetScore
+                      << " gameLives=" << game.lives
+                      << " gameState=" << static_cast<int>(game.state);
         }
         if (boxDemoEntities && world.contains((*boxDemoEntities)[0]) &&
             world.contains((*boxDemoEntities)[1])) {
