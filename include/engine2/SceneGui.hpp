@@ -2,6 +2,7 @@
 
 #include "engine2/SceneIO.hpp"
 #include "engine2/SceneHistory.hpp"
+#include "engine2/ScenePicking.hpp"
 #include "engine2/GizmoMath.hpp"
 #include "engine2/Camera.hpp"
 
@@ -12,6 +13,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace engine2 {
 
@@ -29,6 +31,12 @@ public:
     void setVisible(bool visible);
     [[nodiscard]] bool visible() const { return visible_; }
     void selectIndex(const Scene& scene, std::size_t index);
+    void addIndex(const Scene& scene, std::size_t index);
+    [[nodiscard]] Entity pickAt(Scene& scene, const Camera& camera,
+                                 glm::vec2 pixel, glm::vec2 viewport,
+                                 bool additive = false);
+    [[nodiscard]] std::size_t selectedCount() const { return selection_.size(); }
+    [[nodiscard]] Entity selectedEntity() const { return selected_; }
     void setGizmoEnabled(bool enabled) { gizmoEnabled_ = enabled; }
     [[nodiscard]] bool gizmoEnabled() const { return gizmoEnabled_; }
     void setGizmoMode(GizmoMode mode) {
@@ -53,6 +61,8 @@ private:
     void drawProperties(Scene& scene);
     void choose(Scene& scene, Entity entity);
     void drawGizmo(Scene& scene, const Camera& camera);
+    void drawSelectionOutlines(const Scene& scene, const Camera& camera);
+    void select(Scene& scene, Entity entity, bool additive);
     void applyWidgetEdit(Scene& scene, bool changed,
                          const std::function<void(Scene&)>& mutation);
     void undo(Scene& scene);
@@ -60,6 +70,14 @@ private:
 
     GLFWwindow* window_ = nullptr;
     Entity selected_{};
+    SceneSelection selection_{};
+    bool gizmoHovering_ = false;
+    struct DragTarget {
+        Entity entity{};
+        glm::mat4 local{1.0f};
+        glm::mat4 parentWorld{1.0f};
+    };
+    std::vector<DragTarget> dragTargets_{};
     bool visible_ = false;
     bool edited_ = false;
     bool gizmoEnabled_ = true;

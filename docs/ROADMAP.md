@@ -133,8 +133,17 @@
 - [x] Поддержка нетривиальных parent matrices и атомарного undo одного жеста
 - [x] CLI --gizmo-mode, --gizmo-snap, --gizmo-grid; численные и OpenGL-тесты
 
-## v1.8 — инструменты сцены и физика (план)
-- [ ] Выделение объектов кликом непосредственно в viewport и multi-select
+## v1.8 — выбор объектов из viewport и мультивыделение (готово)
+- [x] CPU-луч из экранных координат через inverse view-projection
+- [x] Пересечение с реальным локальным bounding box Mesh, transformed ray, выбор ближайшего
+- [x] Отбор видимых активных сущностей и исключение stale generation handles
+- [x] Ctrl/Shift+click в 3D-виде и дереве Scene, primary selection, подсветка групп
+- [x] Групповые трансформации и удаление как один Undo; пропуск потомков выбранных родителей
+- [x] CLI --pick-screen / --pick-add / --gui-add и диагностика выбранных объектов
+- [x] CPU ray/selection tests и headless OpenGL image regression
+
+## v1.9 — улучшение физики и инструменты сцены (план)
+- [ ] Triangle-accurate / GPU ID-buffer picking, rectangle selection и общий pivot
 - [ ] 3D broadphase, трение, итерационный решатель покоящихся контактов, CCD
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
@@ -142,7 +151,7 @@
 - [ ] GPU profiling, cached shadow maps, instanced rendering
 - [ ] UV1, KHR glTF extensions, асинхронное readback экспозиции
 
-## v1.9+ — крупные игровые системы (план)
+## v2.0+ — крупные игровые системы (план)
 - [ ] Скелетная анимация, физика/коллизии, звук, скрипты
 - [ ] Vulkan/D3D12 backend, render graph
 - [ ] Глобальное освещение (пробы/ray tracing) и real-time отражения
