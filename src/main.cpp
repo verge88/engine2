@@ -5,6 +5,7 @@
 #include "engine2/Scene.hpp"
 #include "engine2/SceneIO.hpp"
 #include "engine2/SceneInspector.hpp"
+#include "engine2/SceneGui.hpp"
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -71,6 +72,8 @@ struct Arguments {
     std::optional<std::filesystem::path> loadScene;
     std::optional<std::filesystem::path> editScene;
     std::optional<std::filesystem::path> inspectScene;
+    std::optional<bool> guiVisible;
+    std::optional<std::size_t> guiSelection;
     engine2::RendererOptions renderer;
     int pointLights = 3;
     std::optional<float> fixedLightTime;
@@ -189,6 +192,19 @@ Arguments parseArgs(int argc, char** argv) {
             args.renderer.frustumCulling = value != 0.0f;
         } else if (arg == "--stats") {
             args.stats = true;
+        } else if (arg == "--gui" && i + 1 < argc) {
+            const float value = parseSetting(argv[++i], "--gui", 0.0f, 1.0f);
+            if (value != std::floor(value))
+                throw std::invalid_argument("--gui requires 0 or 1");
+            args.guiVisible = value != 0.0f;
+        } else if (arg == "--gui-select" && i + 1 < argc) {
+            const std::string value(argv[++i]);
+            std::size_t parsed = 0;
+            const unsigned long long index = std::stoull(value, &parsed);
+            if (parsed != value.size() || value[0] == '-' ||
+                index > 1000000ULL)
+                throw std::invalid_argument("--gui-select requires an entity ordinal 0..1000000");
+            args.guiSelection = static_cast<std::size_t>(index);
         } else if (arg == "--edit-scene" && i + 1 < argc) {
             args.editScene = std::filesystem::path(argv[++i]);
         } else if (arg == "--inspect-scene" && i + 1 < argc) {
@@ -297,9 +313,10 @@ int run(int argc, char** argv) {
                      "               [--sim-dt 0..0.25]\n"
                      "               [--save-scene world.json] [--load-scene world.json]\n"
                      "               [--edit-scene edits.json] [--inspect-scene report.json]\n"
+                     "               [--gui 0|1] [--gui-select entity-index]\n"
                      "               [--stats] [--screenshot frame.ppm]\n";
         std::cout << "Controls: WASD move, mouse look, Space/Ctrl up/down, "
-                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, Tab cursor, Esc exit.\n";
+                     "Shift sprint, wheel FOV, T TAA, E auto-exposure, F1 GUI, Tab cursor, Esc exit.\n";
         return 0;
     }
 
@@ -329,7 +346,8 @@ int run(int argc, char** argv) {
         }
     });
     glfwSetScrollCallback(window, [](GLFWwindow* w, double, double y) {
-        static_cast<engine2::Camera*>(glfwGetWindowUserPointer(w))->onScroll(y);
+        if (glfwGetInputMode(w, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+            static_cast<engine2::Camera*>(glfwGetWindowUserPointer(w))->onScroll(y);
     });
 
     // All GL resources must be destroyed before GlfwSession destroys the context.
@@ -514,6 +532,25 @@ int run(int argc, char** argv) {
         std::cout << "Scene edits applied: " << count << '\n';
     }
 
+    // The overlay is shown by default in interactive sessions, but disabled
+    // for --frames/headless regression captures unless explicitly requested.
+    // Initialize after the camera GLFW callbacks so ImGui can chain them.
+    engine2::SceneGui gui(window);
+    if (args.guiSelection) gui.selectIndex(world, *args.guiSelection);
+    gui.setVisible(args.guiVisible.value_or(!args.frames.has_value()));
+    if (gui.visible() && !args.loadScene && !args.editScene) {
+        // Initialize demo light entities now; they remain paused in edit mode.
+        const auto lights = animatedLights(
+            args.pointLights, args.fixedLightTime.value_or(0.0f));
+        for (std::size_t i = 0; i < lightEntities.size(); ++i) {
+            world.setLocalTransform(lightEntities[i],
+                glm::translate(glm::mat4(1.0f), lights[i].position));
+            engine2::PointLight light = lights[i];
+            light.position = glm::vec3(0.0f);
+            world.setPointLight(lightEntities[i], light);
+        }
+    }
+
     double lastTime = glfwGetTime();
     bool previousTab = false;
     bool previousLess = false;
@@ -523,6 +560,7 @@ int run(int argc, char** argv) {
     bool previousCascadeDebug = false;
     bool previousTemporal = false;
     bool previousAutoExposure = false;
+    bool previousGui = false;
     bool screenshotSaved = false;
     std::uint64_t rendered = 0;
     while (!glfwWindowShouldClose(window) && (!args.frames || rendered < *args.frames)) {
@@ -530,8 +568,15 @@ int run(int argc, char** argv) {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
+        const bool toggleGui = glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS;
+        if (toggleGui && !previousGui) {
+            gui.setVisible(!gui.visible());
+            camera.resetMouseTracking();
+        }
+        previousGui = toggleGui;
+
         const bool tab = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
-        if (tab && !previousTab) {
+        if (tab && !previousTab && !gui.visible()) {
             const bool captured = glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
             glfwSetInputMode(window, GLFW_CURSOR, captured ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
             camera.resetMouseTracking();
@@ -567,7 +612,7 @@ int run(int argc, char** argv) {
 
         const double now = glfwGetTime();
         const float frameDelta = static_cast<float>(now - lastTime);
-        camera.update(window, frameDelta);
+        if (!gui.visible()) camera.update(window, frameDelta);
         lastTime = now;
 
         int width = 0;
@@ -575,7 +620,7 @@ int run(int argc, char** argv) {
         glfwGetFramebufferSize(window, &width, &height);
         if (width == 0 || height == 0) continue;
 
-        if (!args.editScene) {
+        if (!args.editScene && !gui.visible()) {
             const auto lights = animatedLights(
                 args.pointLights, args.fixedLightTime.value_or(static_cast<float>(now)));
             for (std::size_t i = 0; i < lightEntities.size(); ++i) {
@@ -588,9 +633,12 @@ int run(int argc, char** argv) {
         }
 
         // The render backend receives only extracted scene components.
-        (void)world.advance(args.simulationDelta.value_or(frameDelta));
+        (void)world.advance(gui.visible() ? 0.0f :
+                            args.simulationDelta.value_or(frameDelta));
         renderer.setPointLights(world.pointLights());
         renderer.render(camera, world.renderItems(), width, height, frameDelta);
+        // Composite the GUI on the default back buffer BEFORE PPM capture.
+        gui.draw(world, assetRegistry);
         if (args.screenshot && !screenshotSaved &&
             (!args.frames || rendered + 1 == *args.frames)) {
             saveScreenshot(*args.screenshot, width, height);
@@ -616,7 +664,8 @@ int run(int argc, char** argv) {
                   << " autoExposure=" << (renderer.autoExposure() ? 1 : 0)
                   << " meteredExposure=" << stats.meteredExposure
                   << " effectiveExposure=" << stats.effectiveExposure
-                  << " bloomLevels=" << stats.bloomMipLevels;
+                  << " bloomLevels=" << stats.bloomMipLevels
+                  << " guiVisible=" << (gui.visible() ? 1 : 0);
         const auto sceneStats = world.stats();
         std::cout << " sceneEntities=" << sceneStats.entities
                   << " sceneRenderables=" << sceneStats.renderables
