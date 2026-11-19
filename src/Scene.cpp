@@ -344,17 +344,16 @@ void Scene::fixedStep() {
     broadphaseCells_+=broadphase.occupiedCells;
     broadphaseTests_+=broadphase.candidateTests;
 
-    // Event-driven continuous collision detection. Only opt-in dynamic
-    // spheres advance on the CCD timeline. Targets are static sphere/AABBs,
-    // or another opt-in moving sphere. Other dynamic shapes remain discrete.
-    // Rebuild swept 3D pairs after EVERY impact, because bouncing can send a
-    // sphere towards a wall entirely outside its original swept AABB.
+    // Event-driven continuous collision detection. Opt-in dynamic spheres
+    // and translation-only AABBs advance on the same CCD timeline. Targets
+    // are static sphere/AABBs or another opt-in moving collider. Rebuild swept
+    // 3D pairs after EVERY impact, because bouncing can send a body towards a
+    // wall entirely outside its original swept AABB.
     std::vector<std::size_t> ccdActors;
     std::vector<std::size_t> ccdObjects;
     for (std::size_t i=0;i<candidates.size();++i) {
         const RigidBodyComponent& body=*slots_[candidates[i].slot].body;
-        const bool actor=!body.isStatic && body.continuous &&
-                         body.shape==ColliderShape::Sphere;
+        const bool actor=!body.isStatic && body.continuous;
         if (actor) {
             ccdActors.push_back(i);
             candidates[i].position=candidates[i].start;
@@ -400,22 +399,11 @@ void Scene::fixedStep() {
                     (a.isStatic ? glm::vec3(0.0f) : a.velocity*remaining);
                 const glm::vec3 endB=second.position+
                     (b.isStatic ? glm::vec3(0.0f) : b.velocity*remaining);
-                std::optional<SweptSphereHit> hit;
-                if (!a.isStatic && !b.isStatic) {
-                    // Both bodies are guaranteed to be opted-in spheres.
-                    hit=sweepSphereMoving(
-                        first.position,endA,a.radius,
-                        second.position,endB,b.radius);
-                } else if (!a.isStatic) {
-                    hit=sweepSphereStatic(
-                        first.position,endA,a.radius,
-                        {b.shape,b.radius,b.halfExtents},second.position);
-                } else if (!b.isStatic) {
-                    hit=sweepSphereStatic(
-                        second.position,endB,b.radius,
-                        {a.shape,a.radius,a.halfExtents},first.position);
-                    if (hit) hit->normal=-hit->normal;
-                }
+                const std::optional<SweptSphereHit> hit=sweepColliderMoving(
+                    first.position,endA,
+                    {a.shape,a.radius,a.halfExtents},
+                    second.position,endB,
+                    {b.shape,b.radius,b.halfExtents});
                 // Grid pairs are sorted, so exact-time ties use stable order.
                 if (hit && (!earliest ||
                             hit->fraction<earliest->fraction-1.0e-6f)) {
