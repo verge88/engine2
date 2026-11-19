@@ -148,6 +148,7 @@ private:
     [[nodiscard]] const Slot& checked(Entity entity) const;
     [[nodiscard]] Slot& checked(Entity entity);
     [[nodiscard]] bool isVisible(Entity entity) const;
+    void invalidateContacts(std::uint32_t slot);
     void fixedStep();
 
     std::vector<Slot> slots_;
