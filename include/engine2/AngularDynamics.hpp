@@ -12,8 +12,8 @@ namespace engine2 {
 
 // Integrate a root rigid body's WORLD-axis angular velocity in radians/second.
 // Translation is preserved exactly and the existing 3x3 basis (including
-// scale) is rotated as a whole. This is currently used only for spherical
-// colliders, whose collision geometry is rotation-invariant.
+// authored visual scale) is rotated as a whole. Spheres and discrete OBBs use
+// this path; continuous boxes remain translation-only until rotating OBB CCD.
 inline glm::mat4 integrateAngularVelocity(
     glm::mat4 transform, glm::vec3 angularVelocity, float deltaSeconds) {
     const float speed=glm::length(angularVelocity);
