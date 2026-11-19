@@ -381,6 +381,25 @@ void SceneGui::drawProperties(Scene& scene) {
             working.setRigidBody(entity,modified);
         });
 
+        const bool angularEditable=
+            body.shape==ColliderShape::Sphere && !body.isStatic;
+        float angular[3]{
+            body.angularVelocity.x,body.angularVelocity.y,body.angularVelocity.z
+        };
+        ImGui::BeginDisabled(!angularEditable);
+        const bool changedAngular=ImGui::DragFloat3(
+            "Angular velocity (rad/s)",angular,0.02f,-1000.0f,1000.0f);
+        ImGui::EndDisabled();
+        applyWidgetEdit(scene,changedAngular && angularEditable,
+                        [&](Scene& working) {
+            RigidBodyComponent modified=*working.rigidBodyComponent(entity);
+            modified.angularVelocity=glm::vec3(
+                angular[0],angular[1],angular[2]);
+            working.setRigidBody(entity,modified);
+        });
+        if (!angularEditable)
+            ImGui::TextDisabled("Angular velocity: dynamic sphere only");
+
         float mass=scene.rigidBodyComponent(entity)->mass;
         const bool changedMass=ImGui::DragFloat("Mass",&mass,0.05f,0.01f,10000.0f);
         applyWidgetEdit(scene,changedMass,[&](Scene& working) {
@@ -428,7 +447,7 @@ void SceneGui::drawProperties(Scene& scene) {
             edited_=true;
         }
         bool continuous=scene.rigidBodyComponent(entity)->continuous;
-        if (ImGui::Checkbox("CCD (sphere vs static)",&continuous)) {
+        if (ImGui::Checkbox("CCD (continuous)",&continuous)) {
             history_.perform(scene,[&](Scene& working) {
                 auto modified=*working.rigidBodyComponent(entity);
                 modified.continuous=continuous;
@@ -441,6 +460,7 @@ void SceneGui::drawProperties(Scene& scene) {
             history_.perform(scene,[&](Scene& working) {
                 auto modified=*working.rigidBodyComponent(entity);
                 modified.isStatic=isStatic;
+                if (isStatic) modified.angularVelocity=glm::vec3(0.0f);
                 working.setRigidBody(entity,modified);
             });
             edited_=true;
