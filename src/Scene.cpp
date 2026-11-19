@@ -355,7 +355,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+half.y;
             if (position.y<floor) {
                 position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {body.restitution,body.staticFriction,body.dynamicFriction});
             }
             slot.local[3]=glm::vec4(position,1.0f);
@@ -525,7 +528,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+actor.half.y;
             if (actor.position.y<floor) {
                 actor.position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }
@@ -653,7 +659,10 @@ void Scene::fixedStep() {
             const float floor=body.groundHeight+candidate.half.y;
             if (candidate.position.y<floor) {
                 candidate.position.y=floor;
-                solveFloorImpact(body.velocity,
+                solveFloorImpactAngular(
+                    body.velocity,body.angularVelocity,
+                    1.0f/body.mass,inverseAngularInertia(body),
+                    body.shape==ColliderShape::Sphere ? body.radius : 0.0f,
                     {0.0f,body.staticFriction,body.dynamicFriction});
             }
         }
