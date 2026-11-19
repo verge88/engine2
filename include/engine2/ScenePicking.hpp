@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine2/Scene.hpp"
+#include "engine2/Mesh.hpp"
 
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
