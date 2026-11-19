@@ -504,7 +504,6 @@ void Scene::fixedStep() {
         glm::vec3 normal{1.0f,0.0f,0.0f};
         bool hasCached=false;
         bool counted=false;
-        bool warmStarted=false;
     };
     std::vector<Constraint> constraints;
     constraints.reserve(broadphase.pairs.size());
@@ -569,9 +568,9 @@ void Scene::fixedStep() {
                     c.impulse.accumulatedTangent=c.cached.tangentImpulse;
                     c.impulse.reboundTarget=0.0f;
                     c.impulse.initialized=true;
+                    c.impulse.persistentEligible=true;
                     warmStartContactImpulse(
                         velocityA,velocityB,invA,invB,contact.normal,c.impulse);
-                    c.warmStarted=true;
                     ++contactWarmStarts_;
                 }
             }
@@ -607,7 +606,7 @@ void Scene::fixedStep() {
     // replayed on the next fixed step. Entries not seen this step are pruned.
     for (const Constraint& c : constraints) {
         if (c.counted && c.impulse.initialized &&
-            c.impulse.reboundTarget==0.0f &&
+            c.impulse.persistentEligible &&
             c.impulse.accumulatedNormal>0.0f) {
             contactCache_[c.key]={
                 c.impulse.accumulatedNormal,
