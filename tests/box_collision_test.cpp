@@ -46,20 +46,20 @@ int main() {
           "Distant sphere must not hit a box");
 
     const auto corner=sphereBoxContact({0.75f,0.75f,0.0f},0.4f,
-                                       {0,0,0},{0.5f});
+                                       {0,0,0},glm::vec3(0.5f));
     check(corner.colliding && corner.normal.x < -0.6f &&
           corner.normal.y < -0.6f,
           "Sphere-box corner contact direction incorrect");
 
     // Center inside the box: choose nearest exit face, with finite normal.
     const auto inside=sphereBoxContact({0.4f,0.0f,0.0f},0.25f,
-                                       {0,0,0},{0.5f});
+                                       {0,0,0},glm::vec3(0.5f));
     check(inside.colliding && close(inside.penetration,0.35f) &&
           inside.normal.x < -0.999f,
           "Sphere inside box must resolve toward nearest exit face");
 
-    const ColliderGeometry sphere{ColliderShape::Sphere,0.6f,{0.5f}};
-    const ColliderGeometry box{ColliderShape::Box,0.5f,{0.5f}};
+    const ColliderGeometry sphere{ColliderShape::Sphere,0.6f,glm::vec3(0.5f)};
+    const ColliderGeometry box{ColliderShape::Box,0.5f,glm::vec3(0.5f)};
     const auto ab=colliderContact(sphere,{-1.0f,0,0},box,{0,0,0});
     const auto ba=colliderContact(box,{0,0,0},sphere,{-1.0f,0,0});
     check(ab.colliding && ba.colliding &&
@@ -73,7 +73,7 @@ int main() {
           close(overlappingBoxes.penetration,0.3f) &&
           overlappingBoxes.normal.x > 0.99f,
           "Box-box minimum translation axis incorrect");
-    check(!boxBoxContact({-2,0,0},{0.5f},{2,0,0},{0.5f}).colliding,
+    check(!boxBoxContact({-2,0,0},glm::vec3(0.5f),{2,0,0},glm::vec3(0.5f)).colliding,
           "Separated boxes cannot collide");
 
     Scene runtime;
@@ -111,7 +111,7 @@ int main() {
     dynamic.setLocalTransform(right,at({0.6f,0,0}));
     RigidBodyComponent b1,b2;
     b1.shape=ColliderShape::Box; b2.shape=ColliderShape::Box;
-    b1.halfExtents={0.5f}; b2.halfExtents={0.5f};
+    b1.halfExtents=glm::vec3(0.5f); b2.halfExtents=glm::vec3(0.5f);
     b1.gravity=false; b2.gravity=false;
     b1.restitution=1.0f; b2.restitution=1.0f;
     b1.velocity={2,0,0}; b2.velocity={-2,0,0};
