@@ -211,7 +211,8 @@
 - [x] Free-spin angular velocity/integration для динамических Sphere rigid bodies + JSON/editor support
 - [x] Solid-sphere moment of inertia + friction torque для Sphere/Sphere, Sphere/AABB, CCD, warm-start и ground rolling
 - [x] Playable Orb Arena demo: player steering, collectibles, hazards, lives/restart, HUD title и headless smoke-test
-- [ ] Box inertia tensor, collision torque для вращающихся OBB и joints
+- [x] Box inertia tensor + discrete rotating OBB Sphere/Box и Box/Box collision torque
+- [ ] Rotating OBB CCD, clipped multi-point box manifolds и joints
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning
