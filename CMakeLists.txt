@@ -84,6 +84,7 @@ add_library(engine2_core STATIC
     src/Scene.cpp
     src/SceneIO.cpp
     src/SceneInspector.cpp
+    src/ArenaGame.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
