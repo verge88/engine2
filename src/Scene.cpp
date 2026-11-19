@@ -162,6 +162,31 @@ bool Scene::isVisible(Entity entity) const {
     return true;
 }
 
+std::vector<Entity> Scene::entities() const {
+    std::vector<Entity> result;
+    result.reserve(slots_.size());
+    for (std::size_t i = 0; i < slots_.size(); ++i) {
+        if (slots_[i].alive)
+            result.push_back({static_cast<std::uint32_t>(i), slots_[i].generation});
+    }
+    return result;
+}
+
+const MeshRendererComponent* Scene::rendererComponent(Entity entity) const {
+    const auto& component = checked(entity).renderer;
+    return component ? &*component : nullptr;
+}
+
+const PointLight* Scene::pointLightComponent(Entity entity) const {
+    const auto& component = checked(entity).light;
+    return component ? &*component : nullptr;
+}
+
+const RigidBodyComponent* Scene::rigidBodyComponent(Entity entity) const {
+    const auto& component = checked(entity).body;
+    return component ? &*component : nullptr;
+}
+
 void Scene::setRenderer(Entity entity, MeshRendererComponent component) {
     checked(entity).renderer = std::move(component);
 }

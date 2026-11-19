@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.1.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,6 +58,7 @@ add_library(engine2_core STATIC
     src/PointShadowMaps.cpp
     src/CascadedShadowMaps.cpp
     src/Scene.cpp
+    src/SceneIO.cpp
 )
 target_include_directories(engine2_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -114,6 +115,10 @@ if(BUILD_TESTING)
     add_executable(engine2_sphere_collision_tests tests/sphere_collision_test.cpp)
     target_link_libraries(engine2_sphere_collision_tests PRIVATE engine2_core)
     add_test(NAME sphere-collision-unit COMMAND engine2_sphere_collision_tests)
+    add_executable(engine2_scene_io_tests tests/scene_io_test.cpp)
+    target_link_libraries(engine2_scene_io_tests PRIVATE engine2_core)
+    add_test(NAME scene-json-io-unit COMMAND engine2_scene_io_tests)
+
 endif()
 if(BUILD_TESTING AND UNIX)
     find_program(XVFB_RUN xvfb-run)
@@ -251,6 +256,17 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(sphere-collision-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        # Actual headless OpenGL roundtrips for procedural physics and
+        # glTF MASK materials with stable GPU texture references.
+        add_test(NAME scene-json-roundtrip-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_scene_io.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/alpha-mask.gltf")
+        set_tests_properties(scene-json-roundtrip-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+
 
 
 
