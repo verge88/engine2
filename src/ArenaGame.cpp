@@ -64,7 +64,7 @@ void ArenaGame::build(Scene& scene,
                       const Mesh* floorMesh) {
     floor_=scene.createEntity("Orb Arena Floor");
     scene.setLocalTransform(
-        floor_,scaledAt({0.0f,0.0f,0.0f},{6.3f,1.0f,6.3f}));
+        floor_,scaledAt({0.0f,0.0f,0.0f},{11.5f,1.0f,11.5f}));
     Material floorMaterial=material({0.055f,0.075f,0.105f},0.18f,0.58f);
     floorMaterial.checker=true;
     scene.setRenderer(floor_,{floorMesh,floorMaterial});
