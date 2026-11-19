@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(engine2 VERSION 1.5.0 LANGUAGES C CXX)
+project(engine2 VERSION 1.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -150,6 +150,14 @@ if(BUILD_TESTING)
     target_link_libraries(engine2_scene_inspector_tests PRIVATE engine2_core)
     target_include_directories(engine2_scene_inspector_tests PRIVATE ${tinygltf_SOURCE_DIR})
     add_test(NAME scene-inspector-editor-unit COMMAND engine2_scene_inspector_tests)
+    add_executable(engine2_scene_history_tests tests/scene_history_test.cpp)
+    target_link_libraries(engine2_scene_history_tests PRIVATE engine2_core)
+    add_test(NAME scene-editor-undo-redo-unit COMMAND engine2_scene_history_tests)
+    add_executable(engine2_gizmo_math_tests tests/gizmo_math_test.cpp)
+    target_include_directories(engine2_gizmo_math_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(engine2_gizmo_math_tests PRIVATE glm::glm)
+    add_test(NAME viewport-gizmo-math-unit COMMAND engine2_gizmo_math_tests)
 
 endif()
 if(BUILD_TESTING AND UNIX)
@@ -324,6 +332,13 @@ if(BUILD_TESTING AND UNIX)
                     "${CMAKE_CURRENT_BINARY_DIR}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/scene-edits-demo.json")
         set_tests_properties(scene-gui-overlay-image-regression PROPERTIES
+            ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        add_test(NAME viewport-gizmo-overlay-image-regression
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_gizmo.py"
+                    "${XVFB_RUN}" "$<TARGET_FILE:engine2>"
+                    "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(viewport-gizmo-overlay-image-regression PROPERTIES
             ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
 
 
