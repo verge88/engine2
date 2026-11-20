@@ -5,6 +5,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/vec3.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -32,6 +33,9 @@ struct Contact {
 struct ManifoldPoint {
     glm::vec3 point{0.0f};
     float penetration = 0.0f;
+    // Zero means "no stable topological identity". Nonzero IDs are derived
+    // from local box features and survive ordinary translation/rotation.
+    std::uint32_t featureId = 0;
 };
 
 struct ContactManifold {
@@ -48,6 +52,31 @@ struct OrientedBox {
     glm::vec3 halfExtents{0.5f};
 };
 
+inline std::uint8_t orientedBoxSupportEdgeFeatureCode(
+    const OrientedBox& box,int edgeAxis,glm::vec3 supportDirection) {
+    std::uint8_t bits=0;
+    for (int axis=0;axis<3;++axis) {
+        if (axis==edgeAxis) continue;
+        const std::uint8_t state=
+            glm::dot(supportDirection,box.rotation[axis])>=0.0f ? 2 : 1;
+        bits|=static_cast<std::uint8_t>(state<<(axis*2));
+    }
+    return static_cast<std::uint8_t>(bits+1);
+}
+
+inline std::uint32_t boxBoxContactFeatureId(
+    std::uint8_t featureA,std::uint8_t featureB) {
+    if (featureA==0 || featureB==0) return 0;
+    return 0x10000000u |
+        (static_cast<std::uint32_t>(featureA)<<8) |
+        static_cast<std::uint32_t>(featureB);
+}
+
+inline std::uint32_t boxPlaneContactFeatureId(std::uint8_t boxFeature) {
+    if (boxFeature==0) return 0;
+    return 0x20000000u | static_cast<std::uint32_t>(boxFeature);
+}
+
 inline glm::vec3 colliderHalfExtents(const ColliderGeometry& geometry) {
     return geometry.shape == ColliderShape::Box
         ? geometry.halfExtents : glm::vec3(geometry.radius);
@@ -62,6 +91,25 @@ inline glm::vec3 orientedBoxLocalPoint(
         glm::dot(offset,box.rotation[2])
     };
 }
+
+inline std::uint8_t orientedBoxPointFeatureCode(
+    const OrientedBox& box,glm::vec3 surfacePoint) {
+    const glm::vec3 local=orientedBoxLocalPoint(box,surfacePoint);
+    std::uint8_t bits=0;
+    for (int axis=0;axis<3;++axis) {
+        const float tolerance=
+            std::max(1.0e-4f,box.halfExtents[axis]*2.0e-4f);
+        std::uint8_t state=0;
+        if (std::abs(local[axis]+box.halfExtents[axis])<=tolerance)
+            state=1;
+        else if (std::abs(local[axis]-box.halfExtents[axis])<=tolerance)
+            state=2;
+        bits|=static_cast<std::uint8_t>(state<<(axis*2));
+    }
+    // +1 reserves zero for "invalid/no feature".
+    return static_cast<std::uint8_t>(bits+1);
+}
+
 
 inline glm::vec3 orientedBoxWorldPoint(
     const OrientedBox& box,glm::vec3 localPoint) {
@@ -247,10 +295,11 @@ inline ClipPolygon clipPolygonAgainstPlane(
 }
 
 inline void addManifoldPoint(
-    ContactManifold& manifold,glm::vec3 point,float penetration) {
+    ContactManifold& manifold,glm::vec3 point,float penetration,
+    std::uint32_t featureId=0) {
     if (penetration<0.0f) return;
     if (manifold.pointCount<manifold.points.size()) {
-        manifold.points[manifold.pointCount++]={point,penetration};
+        manifold.points[manifold.pointCount++]={point,penetration,featureId};
         return;
     }
 
@@ -260,13 +309,13 @@ inline void addManifoldPoint(
             manifold.points[shallowest].penetration)
             shallowest=i;
     if (penetration>manifold.points[shallowest].penetration)
-        manifold.points[shallowest]={point,penetration};
+        manifold.points[shallowest]={point,penetration,featureId};
 }
 
 inline ContactManifold orientedBoxFaceManifold(
     const OrientedBox& reference,const OrientedBox& incident,
     int referenceAxis,glm::vec3 referenceNormal,
-    glm::vec3 manifoldNormal,float satPenetration) {
+    glm::vec3 manifoldNormal,float satPenetration,bool referenceIsA) {
     ContactManifold result;
     result.colliding=true;
     result.normal=manifoldNormal;
@@ -341,9 +390,17 @@ inline ContactManifold orientedBoxFaceManifold(
             glm::dot(referenceNormal,point-referenceFaceCenter);
         if (separation>contactEpsilon) continue;
         const float penetration=std::max(0.0f,-separation);
-        const glm::vec3 midpoint=
-            point-referenceNormal*(0.5f*separation);
-        addManifoldPoint(result,midpoint,penetration);
+        const glm::vec3 referencePoint=
+            point-referenceNormal*separation;
+        const glm::vec3 midpoint=0.5f*(point+referencePoint);
+        const std::uint8_t referenceFeature=
+            orientedBoxPointFeatureCode(reference,referencePoint);
+        const std::uint8_t incidentFeature=
+            orientedBoxPointFeatureCode(incident,point);
+        const std::uint32_t featureId=referenceIsA
+            ? boxBoxContactFeatureId(referenceFeature,incidentFeature)
+            : boxBoxContactFeatureId(incidentFeature,referenceFeature);
+        addManifoldPoint(result,midpoint,penetration,featureId);
     }
     return result;
 }
@@ -413,10 +470,10 @@ inline ContactManifold orientedBoxManifold(
     ContactManifold result;
     if (sat.kind==ObbSatAxisKind::FaceA) {
         result=orientedBoxFaceManifold(
-            a,b,sat.axisA,sat.normal,sat.normal,sat.penetration);
+            a,b,sat.axisA,sat.normal,sat.normal,sat.penetration,true);
     } else if (sat.kind==ObbSatAxisKind::FaceB) {
         result=orientedBoxFaceManifold(
-            b,a,sat.axisB,-sat.normal,sat.normal,sat.penetration);
+            b,a,sat.axisB,-sat.normal,sat.normal,sat.penetration,false);
     } else {
         result.colliding=true;
         result.normal=sat.normal;
@@ -427,8 +484,13 @@ inline ContactManifold orientedBoxManifold(
         closestSegmentPoints(
             edgeA.first,edgeA.second,edgeB.first,edgeB.second,
             pointA,pointB);
+        const std::uint8_t featureA=orientedBoxSupportEdgeFeatureCode(
+            a,sat.axisA,sat.normal);
+        const std::uint8_t featureB=orientedBoxSupportEdgeFeatureCode(
+            b,sat.axisB,-sat.normal);
         addManifoldPoint(
-            result,0.5f*(pointA+pointB),sat.penetration);
+            result,0.5f*(pointA+pointB),sat.penetration,
+            boxBoxContactFeatureId(featureA,featureB));
     }
 
     if (result.pointCount==0) {
@@ -438,7 +500,10 @@ inline ContactManifold orientedBoxManifold(
         const glm::vec3 pointA=orientedBoxFeatureSupport(a,sat.normal);
         const glm::vec3 pointB=orientedBoxFeatureSupport(b,-sat.normal);
         addManifoldPoint(
-            result,0.5f*(pointA+pointB),sat.penetration);
+            result,0.5f*(pointA+pointB),sat.penetration,
+            boxBoxContactFeatureId(
+                orientedBoxPointFeatureCode(a,pointA),
+                orientedBoxPointFeatureCode(b,pointB)));
     }
     return result;
 }
@@ -487,7 +552,10 @@ inline ContactManifold orientedBoxPlaneManifold(
         // projection keeps the lever arm centered inside a small penetration.
         const glm::vec3 point=
             vertices[i]-planeNormal*(0.5f*separations[i]);
-        addManifoldPoint(result,point,penetration);
+        addManifoldPoint(
+            result,point,penetration,
+            boxPlaneContactFeatureId(
+                orientedBoxPointFeatureCode(box,vertices[i])));
     }
 
     if (result.pointCount==0) {
@@ -495,7 +563,9 @@ inline ContactManifold orientedBoxPlaneManifold(
         for (std::size_t i=1;i<separations.size();++i)
             if (separations[i]<separations[lowest]) lowest=i;
         addManifoldPoint(
-            result,vertices[lowest],std::max(0.0f,-separations[lowest]));
+            result,vertices[lowest],std::max(0.0f,-separations[lowest]),
+            boxPlaneContactFeatureId(
+                orientedBoxPointFeatureCode(box,vertices[lowest])));
     }
     return result;
 }

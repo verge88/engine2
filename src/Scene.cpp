@@ -372,6 +372,7 @@ SceneStats Scene::stats() const {
     result.boxContacts = boxContacts_;
     result.persistentContacts = contactCache_.size();
     result.contactWarmStarts = contactWarmStarts_;
+    result.contactFeatureWarmStarts = contactFeatureWarmStarts_;
     result.multiPointManifolds = multiPointManifolds_;
     result.manifoldPoints = manifoldPoints_;
     result.solverPasses = solverPasses_;
@@ -599,6 +600,7 @@ void Scene::fixedStep() {
     struct ConstraintPoint {
         ContactImpulseState impulse;
         glm::vec3 point{0.0f};
+        std::uint32_t featureId = 0;
         int lastSeenPass = -1;
     };
     struct Constraint {
@@ -715,13 +717,25 @@ void Scene::fixedStep() {
 
                 std::size_t stateIndex=c.points.size();
                 float nearest=std::numeric_limits<float>::infinity();
-                for (std::size_t i=0;i<c.pointCount;++i) {
-                    if (usedStepPoints[i]) continue;
-                    const float distance=
-                        glm::length(c.points[i].point-manifoldPoint.point);
-                    if (distance<nearest) {
-                        nearest=distance;
-                        stateIndex=i;
+                if (manifoldPoint.featureId!=0) {
+                    for (std::size_t i=0;i<c.pointCount;++i) {
+                        if (usedStepPoints[i]) continue;
+                        if (c.points[i].featureId==manifoldPoint.featureId) {
+                            stateIndex=i;
+                            nearest=0.0f;
+                            break;
+                        }
+                    }
+                }
+                if (stateIndex==c.points.size()) {
+                    for (std::size_t i=0;i<c.pointCount;++i) {
+                        if (usedStepPoints[i]) continue;
+                        const float distance=
+                            glm::length(c.points[i].point-manifoldPoint.point);
+                        if (distance<nearest) {
+                            nearest=distance;
+                            stateIndex=i;
+                        }
                     }
                 }
 
@@ -746,6 +760,7 @@ void Scene::fixedStep() {
                 usedStepPoints[stateIndex]=true;
                 ConstraintPoint& state=c.points[stateIndex];
                 state.point=manifoldPoint.point;
+                state.featureId=manifoldPoint.featureId;
                 state.lastSeenPass=pass;
 
                 glm::vec3 velocityA=
@@ -765,17 +780,32 @@ void Scene::fixedStep() {
                     std::size_t cachedIndex=c.cached.points.size();
                     float cachedDistance=
                         std::numeric_limits<float>::infinity();
-                    for (std::size_t i=0;i<c.cached.pointCount;++i) {
-                        if (usedCachedPoints[i]) continue;
-                        const float distance=glm::length(
-                            c.cached.points[i].point-state.point);
-                        if (distance<cachedDistance) {
-                            cachedDistance=distance;
-                            cachedIndex=i;
+                    bool featureMatched=false;
+                    if (state.featureId!=0) {
+                        for (std::size_t i=0;i<c.cached.pointCount;++i) {
+                            if (usedCachedPoints[i]) continue;
+                            if (c.cached.points[i].featureId==state.featureId) {
+                                cachedIndex=i;
+                                cachedDistance=0.0f;
+                                featureMatched=true;
+                                break;
+                            }
+                        }
+                    }
+                    if (cachedIndex==c.cached.points.size()) {
+                        for (std::size_t i=0;i<c.cached.pointCount;++i) {
+                            if (usedCachedPoints[i]) continue;
+                            const float distance=glm::length(
+                                c.cached.points[i].point-state.point);
+                            if (distance<cachedDistance) {
+                                cachedDistance=distance;
+                                cachedIndex=i;
+                            }
                         }
                     }
                     if (cachedIndex<c.cached.pointCount &&
-                        cachedDistance<=warmPointDistance) {
+                        (featureMatched ||
+                         cachedDistance<=warmPointDistance)) {
                         const glm::vec3 pointA=contactPointVelocity(
                             velocityA,angularA,leverA);
                         const glm::vec3 pointB=contactPointVelocity(
@@ -798,6 +828,7 @@ void Scene::fixedStep() {
                                 leverA,leverB,manifold.normal,state.impulse);
                             usedCachedPoints[cachedIndex]=true;
                             ++contactWarmStarts_;
+                            if (featureMatched) ++contactFeatureWarmStarts_;
                         }
                     }
                 }
@@ -867,13 +898,29 @@ void Scene::fixedStep() {
 
                 std::size_t stateIndex=floorConstraint.points.size();
                 float nearest=std::numeric_limits<float>::infinity();
-                for (std::size_t i=0;i<floorConstraint.pointCount;++i) {
-                    if (usedStepPoints[i]) continue;
-                    const float distance=glm::length(
-                        floorConstraint.points[i].point-manifoldPoint.point);
-                    if (distance<nearest) {
-                        nearest=distance;
-                        stateIndex=i;
+                if (manifoldPoint.featureId!=0) {
+                    for (std::size_t i=0;
+                         i<floorConstraint.pointCount;++i) {
+                        if (usedStepPoints[i]) continue;
+                        if (floorConstraint.points[i].featureId==
+                            manifoldPoint.featureId) {
+                            stateIndex=i;
+                            nearest=0.0f;
+                            break;
+                        }
+                    }
+                }
+                if (stateIndex==floorConstraint.points.size()) {
+                    for (std::size_t i=0;
+                         i<floorConstraint.pointCount;++i) {
+                        if (usedStepPoints[i]) continue;
+                        const float distance=glm::length(
+                            floorConstraint.points[i].point-
+                            manifoldPoint.point);
+                        if (distance<nearest) {
+                            nearest=distance;
+                            stateIndex=i;
+                        }
                     }
                 }
                 if (stateIndex==floorConstraint.points.size() ||
@@ -903,6 +950,7 @@ void Scene::fixedStep() {
                 ConstraintPoint& state=
                     floorConstraint.points[stateIndex];
                 state.point=manifoldPoint.point;
+                state.featureId=manifoldPoint.featureId;
                 state.lastSeenPass=pass;
 
                 glm::vec3 velocity=body.velocity;
@@ -919,19 +967,37 @@ void Scene::fixedStep() {
                         floorConstraint.cached.points.size();
                     float cachedDistance=
                         std::numeric_limits<float>::infinity();
-                    for (std::size_t i=0;
-                         i<floorConstraint.cached.pointCount;++i) {
-                        if (usedCachedPoints[i]) continue;
-                        const float distance=glm::length(
-                            floorConstraint.cached.points[i].point-
-                            state.point);
-                        if (distance<cachedDistance) {
-                            cachedDistance=distance;
-                            cachedIndex=i;
+                    bool featureMatched=false;
+                    if (state.featureId!=0) {
+                        for (std::size_t i=0;
+                             i<floorConstraint.cached.pointCount;++i) {
+                            if (usedCachedPoints[i]) continue;
+                            if (floorConstraint.cached.points[i].featureId==
+                                state.featureId) {
+                                cachedIndex=i;
+                                cachedDistance=0.0f;
+                                featureMatched=true;
+                                break;
+                            }
+                        }
+                    }
+                    if (cachedIndex==
+                        floorConstraint.cached.points.size()) {
+                        for (std::size_t i=0;
+                             i<floorConstraint.cached.pointCount;++i) {
+                            if (usedCachedPoints[i]) continue;
+                            const float distance=glm::length(
+                                floorConstraint.cached.points[i].point-
+                                state.point);
+                            if (distance<cachedDistance) {
+                                cachedDistance=distance;
+                                cachedIndex=i;
+                            }
                         }
                     }
                     if (cachedIndex<floorConstraint.cached.pointCount &&
-                        cachedDistance<=warmPointDistance) {
+                        (featureMatched ||
+                         cachedDistance<=warmPointDistance)) {
                         const glm::vec3 pointVelocity=contactPointVelocity(
                             velocity,angular,lever);
                         const float closing=glm::dot(
@@ -955,6 +1021,7 @@ void Scene::fixedStep() {
                                 manifold.normal,state.impulse);
                             usedCachedPoints[cachedIndex]=true;
                             ++contactWarmStarts_;
+                            if (featureMatched) ++contactFeatureWarmStarts_;
                         }
                     }
                 }
@@ -995,7 +1062,8 @@ void Scene::fixedStep() {
             persistent.points[persistent.pointCount++]={
                 point.impulse.accumulatedNormal,
                 point.impulse.accumulatedTangent,
-                point.point
+                point.point,
+                point.featureId
             };
         }
         if (c.counted && persistent.pointCount>0)
@@ -1019,7 +1087,8 @@ void Scene::fixedStep() {
             persistent.points[persistent.pointCount++]={
                 point.impulse.accumulatedNormal,
                 point.impulse.accumulatedTangent,
-                point.point
+                point.point,
+                point.featureId
             };
         }
         if (floorConstraint.counted && persistent.pointCount>0)

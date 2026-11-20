@@ -248,6 +248,12 @@ if(BUILD_TESTING)
     add_test(NAME obb-ground-contact-manifold-unit
              COMMAND engine2_ground_manifold_tests)
 
+    add_executable(engine2_contact_feature_id_tests
+        tests/contact_feature_id_test.cpp)
+    target_link_libraries(engine2_contact_feature_id_tests PRIVATE engine2_core)
+    add_test(NAME stable-contact-feature-id-unit
+             COMMAND engine2_contact_feature_id_tests)
+
     add_executable(engine2_arena_game_tests tests/arena_game_test.cpp)
     target_link_libraries(engine2_arena_game_tests PRIVATE engine2_core)
     add_test(NAME orb-arena-gameplay-unit

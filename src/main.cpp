@@ -860,6 +860,7 @@ int run(int argc, char** argv) {
                   << " sceneBoxContacts=" << sceneStats.boxContacts
                   << " scenePersistentContacts=" << sceneStats.persistentContacts
                   << " sceneContactWarmStarts=" << sceneStats.contactWarmStarts
+                  << " sceneContactFeatureWarmStarts=" << sceneStats.contactFeatureWarmStarts
                   << " sceneMultiPointManifolds=" << sceneStats.multiPointManifolds
                   << " sceneManifoldPoints=" << sceneStats.manifoldPoints
                   << " sceneSolverPasses=" << sceneStats.solverPasses;

@@ -209,7 +209,8 @@
 - [x] Persistent pair-contact cache и warm starting накопленных normal/tangent impulses между fixed steps
 - [x] Clipped multi-point OBB face manifolds + per-point persistent warm starting
 - [x] Multi-point OBB/ground-plane support manifolds + persistent per-point warm starting
-- [ ] Stable feature IDs и manifolds для сложных/compound вращающихся тел
+- [x] Stable local-topology feature IDs для OBB/OBB и OBB/ground persistent contacts
+- [ ] Manifolds для сложных/compound вращающихся тел
 - [x] Free-spin angular velocity/integration для динамических Sphere rigid bodies + JSON/editor support
 - [x] Solid-sphere moment of inertia + friction torque для Sphere/Sphere, Sphere/AABB, CCD, warm-start и ground rolling
 - [x] Playable Orb Arena demo: player steering, collectibles, hazards, lives/restart, HUD title и headless smoke-test
