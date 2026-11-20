@@ -838,7 +838,10 @@ void Scene::fixedStep() {
         persistent.lastSeenStep=totalSteps_;
         for (std::size_t i=0;i<c.pointCount;++i) {
             const ConstraintPoint& point=c.points[i];
-            if (point.lastSeenPass<0 ||
+            // Only final-pass features are safe to carry across fixed steps.
+            // A point that disappeared after positional correction is stale;
+            // replaying all such early-pass impulses can kick a resting stack.
+            if (point.lastSeenPass!=iterations-1 ||
                 !point.impulse.initialized ||
                 !point.impulse.persistentEligible ||
                 point.impulse.accumulatedNormal<=0.0f)
