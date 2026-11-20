@@ -380,6 +380,8 @@ SceneStats Scene::stats() const {
     result.boxContacts = boxContacts_;
     result.persistentContacts = contactCache_.size();
     result.contactWarmStarts = contactWarmStarts_;
+    result.multiPointManifolds = multiPointManifolds_;
+    result.manifoldPoints = manifoldPoints_;
     result.solverPasses = solverPasses_;
     for (const Slot& slot : slots_) {
         if (!slot.alive) continue;
@@ -614,14 +616,19 @@ void Scene::fixedStep() {
         }
     }
 
+    struct ConstraintPoint {
+        ContactImpulseState impulse;
+        glm::vec3 point{0.0f};
+        int lastSeenPass = -1;
+    };
     struct Constraint {
         std::size_t first=0;
         std::size_t second=0;
         ContactCacheKey key{};
-        ContactImpulseState impulse;
+        std::array<ConstraintPoint,4> points{};
+        std::size_t pointCount=0;
         PersistentContactState cached;
         glm::vec3 normal{1.0f,0.0f,0.0f};
-        glm::vec3 point{0.0f};
         bool hasCached=false;
         bool counted=false;
     };
@@ -652,22 +659,26 @@ void Scene::fixedStep() {
     constexpr float positionFactor=0.8f;
     constexpr float warmNormalAlignment=0.98f;
     constexpr float warmPointDistance=0.25f;
+    constexpr float stepPointMatchDistance=0.35f;
+
     for (int pass=0;pass<iterations;++pass) {
         for (Constraint& c : constraints) {
             Candidate& first=candidates[c.first];
             Candidate& second=candidates[c.second];
             RigidBodyComponent& a=*slots_[first.slot].body;
             RigidBodyComponent& b=*slots_[second.slot].body;
-            const Contact contact=colliderContactOriented(
+            const ContactManifold manifold=colliderContactManifoldOriented(
                 {a.shape,a.radius,a.halfExtents},first.position,first.rotation,
                 {b.shape,b.radius,b.halfExtents},second.position,second.rotation);
-            if (!contact.colliding) continue;
-            c.normal=contact.normal;
-            c.point=contact.point;
+            if (!manifold.colliding || manifold.pointCount==0) continue;
+            c.normal=manifold.normal;
+
             if (!c.counted) {
                 if (a.shape==ColliderShape::Sphere &&
                     b.shape==ColliderShape::Sphere) ++sphereContacts_;
                 else ++boxContacts_;
+                manifoldPoints_+=manifold.pointCount;
+                if (manifold.pointCount>1) ++multiPointManifolds_;
                 c.counted=true;
             }
 
@@ -675,61 +686,132 @@ void Scene::fixedStep() {
             const float invB=b.isStatic ? 0.0f : 1.0f/b.mass;
             const float total=invA+invB;
             if (total<=0.0f) continue;
-            glm::vec3 velocityA=a.isStatic ? glm::vec3(0.0f) : a.velocity;
-            glm::vec3 velocityB=b.isStatic ? glm::vec3(0.0f) : b.velocity;
-            glm::vec3 angularA=a.isStatic
-                ? glm::vec3(0.0f) : a.angularVelocity;
-            glm::vec3 angularB=b.isStatic
-                ? glm::vec3(0.0f) : b.angularVelocity;
             const glm::mat3 invInertiaA=
                 inverseAngularInertia(a,first.rotation);
             const glm::mat3 invInertiaB=
                 inverseAngularInertia(b,second.rotation);
-            const glm::vec3 leverA=contact.point-first.position;
-            const glm::vec3 leverB=contact.point-second.position;
 
-            if (pass==0 && c.hasCached &&
-                glm::dot(c.cached.normal,contact.normal)>=warmNormalAlignment &&
-                glm::length(c.cached.point-contact.point)<=warmPointDistance) {
-                const glm::vec3 pointA=contactPointVelocity(
-                    velocityA,angularA,leverA);
-                const glm::vec3 pointB=contactPointVelocity(
-                    velocityB,angularB,leverB);
-                const float closing=glm::dot(pointB-pointA,contact.normal);
-                if (closing>=-0.5f) {
-                    c.impulse.accumulatedNormal=c.cached.normalImpulse;
-                    c.impulse.accumulatedTangent=c.cached.tangentImpulse;
-                    c.impulse.reboundTarget=0.0f;
-                    c.impulse.initialized=true;
-                    c.impulse.persistentEligible=true;
-                    warmStartContactImpulseTensor(
-                        velocityA,angularA,velocityB,angularB,
-                        invA,invB,invInertiaA,invInertiaB,
-                        leverA,leverB,contact.normal,c.impulse);
-                    ++contactWarmStarts_;
+            std::array<bool,4> usedStepPoints{};
+            std::array<bool,4> usedCachedPoints{};
+            for (std::size_t pointIndex=0;
+                 pointIndex<manifold.pointCount;++pointIndex) {
+                const ManifoldPoint& manifoldPoint=
+                    manifold.points[pointIndex];
+
+                std::size_t stateIndex=c.points.size();
+                float nearest=std::numeric_limits<float>::infinity();
+                for (std::size_t i=0;i<c.pointCount;++i) {
+                    if (usedStepPoints[i]) continue;
+                    const float distance=
+                        glm::length(c.points[i].point-manifoldPoint.point);
+                    if (distance<nearest) {
+                        nearest=distance;
+                        stateIndex=i;
+                    }
+                }
+
+                if (stateIndex==c.points.size() ||
+                    nearest>stepPointMatchDistance) {
+                    if (c.pointCount<c.points.size()) {
+                        stateIndex=c.pointCount++;
+                    } else {
+                        nearest=std::numeric_limits<float>::infinity();
+                        for (std::size_t i=0;i<c.pointCount;++i) {
+                            if (usedStepPoints[i]) continue;
+                            const float distance=
+                                glm::length(c.points[i].point-manifoldPoint.point);
+                            if (distance<nearest) {
+                                nearest=distance;
+                                stateIndex=i;
+                            }
+                        }
+                        c.points[stateIndex].impulse=ContactImpulseState{};
+                    }
+                }
+                usedStepPoints[stateIndex]=true;
+                ConstraintPoint& state=c.points[stateIndex];
+                state.point=manifoldPoint.point;
+                state.lastSeenPass=pass;
+
+                glm::vec3 velocityA=
+                    a.isStatic ? glm::vec3(0.0f) : a.velocity;
+                glm::vec3 velocityB=
+                    b.isStatic ? glm::vec3(0.0f) : b.velocity;
+                glm::vec3 angularA=
+                    a.isStatic ? glm::vec3(0.0f) : a.angularVelocity;
+                glm::vec3 angularB=
+                    b.isStatic ? glm::vec3(0.0f) : b.angularVelocity;
+                const glm::vec3 leverA=state.point-first.position;
+                const glm::vec3 leverB=state.point-second.position;
+
+                if (pass==0 && c.hasCached &&
+                    glm::dot(c.cached.normal,manifold.normal)>=
+                        warmNormalAlignment) {
+                    std::size_t cachedIndex=c.cached.points.size();
+                    float cachedDistance=
+                        std::numeric_limits<float>::infinity();
+                    for (std::size_t i=0;i<c.cached.pointCount;++i) {
+                        if (usedCachedPoints[i]) continue;
+                        const float distance=glm::length(
+                            c.cached.points[i].point-state.point);
+                        if (distance<cachedDistance) {
+                            cachedDistance=distance;
+                            cachedIndex=i;
+                        }
+                    }
+                    if (cachedIndex<c.cached.pointCount &&
+                        cachedDistance<=warmPointDistance) {
+                        const glm::vec3 pointA=contactPointVelocity(
+                            velocityA,angularA,leverA);
+                        const glm::vec3 pointB=contactPointVelocity(
+                            velocityB,angularB,leverB);
+                        const float closing=
+                            glm::dot(pointB-pointA,manifold.normal);
+                        if (closing>=-0.5f) {
+                            const PersistentContactPoint& cachedPoint=
+                                c.cached.points[cachedIndex];
+                            state.impulse.accumulatedNormal=
+                                cachedPoint.normalImpulse;
+                            state.impulse.accumulatedTangent=
+                                cachedPoint.tangentImpulse;
+                            state.impulse.reboundTarget=0.0f;
+                            state.impulse.initialized=true;
+                            state.impulse.persistentEligible=true;
+                            warmStartContactImpulseTensor(
+                                velocityA,angularA,velocityB,angularB,
+                                invA,invB,invInertiaA,invInertiaB,
+                                leverA,leverB,manifold.normal,state.impulse);
+                            usedCachedPoints[cachedIndex]=true;
+                            ++contactWarmStarts_;
+                        }
+                    }
+                }
+
+                solveContactImpulseTensor(
+                    velocityA,angularA,velocityB,angularB,
+                    invA,invB,invInertiaA,invInertiaB,
+                    leverA,leverB,manifold.normal,
+                    {a.restitution,a.staticFriction,a.dynamicFriction},
+                    {b.restitution,b.staticFriction,b.dynamicFriction},
+                    state.impulse);
+                if (!a.isStatic) {
+                    a.velocity=velocityA;
+                    a.angularVelocity=angularA;
+                }
+                if (!b.isStatic) {
+                    b.velocity=velocityB;
+                    b.angularVelocity=angularB;
                 }
             }
 
-            solveContactImpulseTensor(
-                velocityA,angularA,velocityB,angularB,
-                invA,invB,invInertiaA,invInertiaB,
-                leverA,leverB,contact.normal,
-                {a.restitution,a.staticFriction,a.dynamicFriction},
-                {b.restitution,b.staticFriction,b.dynamicFriction},
-                c.impulse);
-            if (!a.isStatic) {
-                a.velocity=velocityA;
-                a.angularVelocity=angularA;
-            }
-            if (!b.isStatic) {
-                b.velocity=velocityB;
-                b.angularVelocity=angularB;
-            }
-
-            const float overlap=std::max(contact.penetration-positionSlop,0.0f);
+            // Positional stabilization is pair-level, not point-level. A
+            // four-point face manifold must not apply four copies of the same
+            // penetration correction.
+            const float overlap=
+                std::max(manifold.penetration-positionSlop,0.0f);
             const float correction=positionFactor*overlap/total;
-            first.position-=contact.normal*(correction*invA);
-            second.position+=contact.normal*(correction*invB);
+            first.position-=manifold.normal*(correction*invA);
+            second.position+=manifold.normal*(correction*invB);
         }
 
         for (Candidate& candidate : candidates) {
@@ -750,19 +832,27 @@ void Scene::fixedStep() {
     }
 
     for (const Constraint& c : constraints) {
-        if (c.counted && c.impulse.initialized &&
-            c.impulse.persistentEligible &&
-            c.impulse.accumulatedNormal>0.0f) {
-            contactCache_[c.key]={
-                c.impulse.accumulatedNormal,
-                c.impulse.accumulatedTangent,
-                c.normal,
-                c.point,
-                totalSteps_
+        PersistentContactState persistent;
+        persistent.normal=c.normal;
+        persistent.lastSeenStep=totalSteps_;
+        for (std::size_t i=0;i<c.pointCount;++i) {
+            const ConstraintPoint& point=c.points[i];
+            if (point.lastSeenPass<0 ||
+                !point.impulse.initialized ||
+                !point.impulse.persistentEligible ||
+                point.impulse.accumulatedNormal<=0.0f)
+                continue;
+            if (persistent.pointCount>=persistent.points.size()) break;
+            persistent.points[persistent.pointCount++]={
+                point.impulse.accumulatedNormal,
+                point.impulse.accumulatedTangent,
+                point.point
             };
-        } else {
-            contactCache_.erase(c.key);
         }
+        if (c.counted && persistent.pointCount>0)
+            contactCache_[c.key]=persistent;
+        else
+            contactCache_.erase(c.key);
     }
     for (auto it=contactCache_.begin();it!=contactCache_.end();) {
         if (it->second.lastSeenStep!=totalSteps_)
