@@ -443,6 +443,92 @@ inline ContactManifold orientedBoxManifold(
     return result;
 }
 
+inline ContactManifold orientedBoxPlaneManifold(
+    const OrientedBox& box,glm::vec3 planeNormal,float planeOffset,
+    float contactTolerance=0.002f,float featureTolerance=0.002f) {
+    ContactManifold result;
+    const float normalLength=glm::length(planeNormal);
+    if (!(normalLength>1.0e-8f)) return result;
+    planeNormal/=normalLength;
+    planeOffset/=normalLength;
+
+    std::array<glm::vec3,8> vertices{};
+    std::array<float,8> separations{};
+    float minimum=std::numeric_limits<float>::infinity();
+    std::size_t index=0;
+    for (int x=-1;x<=1;x+=2)
+        for (int y=-1;y<=1;y+=2)
+            for (int z=-1;z<=1;z+=2) {
+                const glm::vec3 local(
+                    static_cast<float>(x)*box.halfExtents.x,
+                    static_cast<float>(y)*box.halfExtents.y,
+                    static_cast<float>(z)*box.halfExtents.z);
+                const glm::vec3 vertex=orientedBoxWorldPoint(box,local);
+                const float separation=
+                    glm::dot(planeNormal,vertex)-planeOffset;
+                vertices[index]=vertex;
+                separations[index]=separation;
+                minimum=std::min(minimum,separation);
+                ++index;
+            }
+
+    if (minimum>contactTolerance) return result;
+    result.colliding=true;
+    // Convention matches body A -> static plane B.
+    result.normal=-planeNormal;
+    result.penetration=std::max(0.0f,-minimum);
+
+    const float supportLimit=
+        std::min(contactTolerance,minimum+featureTolerance);
+    for (std::size_t i=0;i<vertices.size();++i) {
+        if (separations[i]>supportLimit) continue;
+        const float penetration=std::max(0.0f,-separations[i]);
+        // Midpoint between the body vertex and its orthogonal plane
+        // projection keeps the lever arm centered inside a small penetration.
+        const glm::vec3 point=
+            vertices[i]-planeNormal*(0.5f*separations[i]);
+        addManifoldPoint(result,point,penetration);
+    }
+
+    if (result.pointCount==0) {
+        std::size_t lowest=0;
+        for (std::size_t i=1;i<separations.size();++i)
+            if (separations[i]<separations[lowest]) lowest=i;
+        addManifoldPoint(
+            result,vertices[lowest],std::max(0.0f,-separations[lowest]));
+    }
+    return result;
+}
+
+inline ContactManifold colliderPlaneManifoldOriented(
+    const ColliderGeometry& body,glm::vec3 position,
+    const glm::mat3& rotation,glm::vec3 planeNormal,float planeOffset) {
+    const float normalLength=glm::length(planeNormal);
+    if (!(normalLength>1.0e-8f)) return {};
+    const glm::vec3 unitNormal=planeNormal/normalLength;
+    const float offset=planeOffset/normalLength;
+
+    if (body.shape==ColliderShape::Box)
+        return orientedBoxPlaneManifold(
+            {position,rotation,body.halfExtents},unitNormal,offset);
+
+    const float separation=
+        glm::dot(unitNormal,position)-body.radius-offset;
+    constexpr float contactTolerance=0.002f;
+    if (separation>contactTolerance) return {};
+    ContactManifold result;
+    result.colliding=true;
+    result.normal=-unitNormal;
+    result.penetration=std::max(0.0f,-separation);
+    result.points[0]={
+        position-unitNormal*body.radius-
+            unitNormal*(0.5f*separation),
+        result.penetration
+    };
+    result.pointCount=1;
+    return result;
+}
+
 inline ContactManifold singleContactManifold(const Contact& contact) {
     ContactManifold result;
     if (!contact.colliding) return result;

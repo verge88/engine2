@@ -56,15 +56,6 @@ glm::vec3 ccdContactLeverArm(
         normal,firstBody);
 }
 
-glm::vec3 boxFloorLeverArm(
-    glm::vec3 position,const RigidBodyComponent& body,
-    const glm::mat3& rotation) {
-    if (body.shape==ColliderShape::Sphere)
-        return glm::vec3(0.0f,-body.radius,0.0f);
-    const OrientedBox box{position,rotation,body.halfExtents};
-    return orientedBoxFeatureSupport(box,glm::vec3(0,-1,0))-position;
-}
-
 float floorHalfHeight(
     const RigidBodyComponent& body,const glm::mat3& rotation) {
     if (body.shape==ColliderShape::Sphere) return body.radius;
@@ -430,14 +421,8 @@ void Scene::fixedStep() {
 
             const float floor=
                 body.groundHeight+floorHalfHeight(body,rotation);
-            if (position.y<floor) {
+            if (position.y<floor)
                 position.y=floor;
-                solveFloorImpactTensor(
-                    body.velocity,body.angularVelocity,
-                    1.0f/body.mass,inverseAngularInertia(body,rotation),
-                    boxFloorLeverArm(position,body,rotation),
-                    {body.restitution,body.staticFriction,body.dynamicFriction});
-            }
             slot.local[3]=glm::vec4(position,1.0f);
         }
 
@@ -606,14 +591,8 @@ void Scene::fixedStep() {
             RigidBodyComponent& body=*slots_[actor.slot].body;
             const float floor=
                 body.groundHeight+floorHalfHeight(body,actor.rotation);
-            if (actor.position.y<floor) {
+            if (actor.position.y<floor)
                 actor.position.y=floor;
-                solveFloorImpactTensor(
-                    body.velocity,body.angularVelocity,
-                    1.0f/body.mass,inverseAngularInertia(body,actor.rotation),
-                    boxFloorLeverArm(actor.position,body,actor.rotation),
-                    {0.0f,body.staticFriction,body.dynamicFriction});
-            }
         }
     }
 
@@ -633,6 +612,17 @@ void Scene::fixedStep() {
         bool hasCached=false;
         bool counted=false;
     };
+    struct FloorConstraint {
+        std::size_t candidate=0;
+        ContactCacheKey key{};
+        std::array<ConstraintPoint,4> points{};
+        std::size_t pointCount=0;
+        PersistentContactState cached;
+        glm::vec3 normal{0.0f,-1.0f,0.0f};
+        bool hasCached=false;
+        bool counted=false;
+    };
+
     std::vector<Constraint> constraints;
     constraints.reserve(broadphase.pairs.size());
     for (const auto& [first,second] : broadphase.pairs) {
@@ -653,6 +643,30 @@ void Scene::fixedStep() {
             constraint.hasCached=true;
         }
         constraints.push_back(constraint);
+    }
+
+    std::vector<FloorConstraint> floorConstraints;
+    floorConstraints.reserve(candidates.size());
+    for (std::size_t i=0;i<candidates.size();++i) {
+        const Candidate& candidate=candidates[i];
+        const RigidBodyComponent& body=*slots_[candidate.slot].body;
+        if (body.isStatic) continue;
+
+        FloorConstraint floor;
+        floor.candidate=i;
+        floor.key={
+            candidate.slot,
+            slots_[candidate.slot].generation,
+            Entity::invalidIndex,
+            0
+        };
+        const auto cached=contactCache_.find(floor.key);
+        if (cached!=contactCache_.end() &&
+            cached->second.lastSeenStep+1==totalSteps_) {
+            floor.cached=cached->second;
+            floor.hasCached=true;
+        }
+        floorConstraints.push_back(floor);
     }
 
     constexpr int iterations=8;
@@ -815,19 +829,150 @@ void Scene::fixedStep() {
             second.position+=manifold.normal*(correction*invB);
         }
 
-        for (Candidate& candidate : candidates) {
+        for (FloorConstraint& floorConstraint : floorConstraints) {
+            Candidate& candidate=candidates[floorConstraint.candidate];
             RigidBodyComponent& body=*slots_[candidate.slot].body;
-            if (body.isStatic) continue;
-            const float floor=
+
+            // Pair correction earlier in the pass may have nudged the body
+            // below its implicit plane. Clamp only position here; all velocity
+            // and angular response comes from the manifold impulses below.
+            const float minimumCenterY=
                 body.groundHeight+floorHalfHeight(body,candidate.rotation);
-            if (candidate.position.y<floor) {
-                candidate.position.y=floor;
-                solveFloorImpactTensor(
-                    body.velocity,body.angularVelocity,
-                    1.0f/body.mass,
-                    inverseAngularInertia(body,candidate.rotation),
-                    boxFloorLeverArm(candidate.position,body,candidate.rotation),
-                    {0.0f,body.staticFriction,body.dynamicFriction});
+            if (candidate.position.y<minimumCenterY)
+                candidate.position.y=minimumCenterY;
+
+            const ContactManifold manifold=colliderPlaneManifoldOriented(
+                {body.shape,body.radius,body.halfExtents},
+                candidate.position,candidate.rotation,
+                glm::vec3(0.0f,1.0f,0.0f),body.groundHeight);
+            if (!manifold.colliding || manifold.pointCount==0) continue;
+            floorConstraint.normal=manifold.normal;
+
+            if (!floorConstraint.counted) {
+                manifoldPoints_+=manifold.pointCount;
+                if (manifold.pointCount>1) ++multiPointManifolds_;
+                floorConstraint.counted=true;
+            }
+
+            const float invMass=1.0f/body.mass;
+            const glm::mat3 invInertia=
+                inverseAngularInertia(body,candidate.rotation);
+            std::array<bool,4> usedStepPoints{};
+            std::array<bool,4> usedCachedPoints{};
+
+            for (std::size_t pointIndex=0;
+                 pointIndex<manifold.pointCount;++pointIndex) {
+                const ManifoldPoint& manifoldPoint=
+                    manifold.points[pointIndex];
+
+                std::size_t stateIndex=floorConstraint.points.size();
+                float nearest=std::numeric_limits<float>::infinity();
+                for (std::size_t i=0;i<floorConstraint.pointCount;++i) {
+                    if (usedStepPoints[i]) continue;
+                    const float distance=glm::length(
+                        floorConstraint.points[i].point-manifoldPoint.point);
+                    if (distance<nearest) {
+                        nearest=distance;
+                        stateIndex=i;
+                    }
+                }
+                if (stateIndex==floorConstraint.points.size() ||
+                    nearest>stepPointMatchDistance) {
+                    if (floorConstraint.pointCount<
+                        floorConstraint.points.size()) {
+                        stateIndex=floorConstraint.pointCount++;
+                    } else {
+                        nearest=std::numeric_limits<float>::infinity();
+                        for (std::size_t i=0;
+                             i<floorConstraint.pointCount;++i) {
+                            if (usedStepPoints[i]) continue;
+                            const float distance=glm::length(
+                                floorConstraint.points[i].point-
+                                manifoldPoint.point);
+                            if (distance<nearest) {
+                                nearest=distance;
+                                stateIndex=i;
+                            }
+                        }
+                        floorConstraint.points[stateIndex].impulse=
+                            ContactImpulseState{};
+                    }
+                }
+
+                usedStepPoints[stateIndex]=true;
+                ConstraintPoint& state=
+                    floorConstraint.points[stateIndex];
+                state.point=manifoldPoint.point;
+                state.lastSeenPass=pass;
+
+                glm::vec3 velocity=body.velocity;
+                glm::vec3 angular=body.angularVelocity;
+                glm::vec3 floorVelocity(0.0f);
+                glm::vec3 floorAngular(0.0f);
+                const glm::vec3 lever=
+                    state.point-candidate.position;
+
+                if (pass==0 && floorConstraint.hasCached &&
+                    glm::dot(floorConstraint.cached.normal,manifold.normal)>=
+                        warmNormalAlignment) {
+                    std::size_t cachedIndex=
+                        floorConstraint.cached.points.size();
+                    float cachedDistance=
+                        std::numeric_limits<float>::infinity();
+                    for (std::size_t i=0;
+                         i<floorConstraint.cached.pointCount;++i) {
+                        if (usedCachedPoints[i]) continue;
+                        const float distance=glm::length(
+                            floorConstraint.cached.points[i].point-
+                            state.point);
+                        if (distance<cachedDistance) {
+                            cachedDistance=distance;
+                            cachedIndex=i;
+                        }
+                    }
+                    if (cachedIndex<floorConstraint.cached.pointCount &&
+                        cachedDistance<=warmPointDistance) {
+                        const glm::vec3 pointVelocity=contactPointVelocity(
+                            velocity,angular,lever);
+                        const float closing=glm::dot(
+                            -pointVelocity,manifold.normal);
+                        if (closing>=-0.5f) {
+                            const PersistentContactPoint& cachedPoint=
+                                floorConstraint.cached.points[cachedIndex];
+                            state.impulse.accumulatedNormal=
+                                cachedPoint.normalImpulse;
+                            state.impulse.accumulatedTangent=
+                                cachedPoint.tangentImpulse;
+                            state.impulse.reboundTarget=0.0f;
+                            state.impulse.initialized=true;
+                            state.impulse.persistentEligible=true;
+                            warmStartContactImpulseTensor(
+                                velocity,angular,
+                                floorVelocity,floorAngular,
+                                invMass,0.0f,
+                                invInertia,glm::mat3(0.0f),
+                                lever,glm::vec3(0.0f),
+                                manifold.normal,state.impulse);
+                            usedCachedPoints[cachedIndex]=true;
+                            ++contactWarmStarts_;
+                        }
+                    }
+                }
+
+                const ContactMaterial material{
+                    body.restitution,
+                    body.staticFriction,
+                    body.dynamicFriction
+                };
+                solveContactImpulseTensor(
+                    velocity,angular,
+                    floorVelocity,floorAngular,
+                    invMass,0.0f,
+                    invInertia,glm::mat3(0.0f),
+                    lever,glm::vec3(0.0f),manifold.normal,
+                    material,material,state.impulse);
+                body.velocity=velocity;
+                body.angularVelocity=angular;
             }
         }
     }
@@ -858,6 +1003,31 @@ void Scene::fixedStep() {
         else
             contactCache_.erase(c.key);
     }
+
+    for (const FloorConstraint& floorConstraint : floorConstraints) {
+        PersistentContactState persistent;
+        persistent.normal=floorConstraint.normal;
+        persistent.lastSeenStep=totalSteps_;
+        for (std::size_t i=0;i<floorConstraint.pointCount;++i) {
+            const ConstraintPoint& point=floorConstraint.points[i];
+            if (point.lastSeenPass!=iterations-1 ||
+                !point.impulse.initialized ||
+                !point.impulse.persistentEligible ||
+                point.impulse.accumulatedNormal<=0.0f)
+                continue;
+            if (persistent.pointCount>=persistent.points.size()) break;
+            persistent.points[persistent.pointCount++]={
+                point.impulse.accumulatedNormal,
+                point.impulse.accumulatedTangent,
+                point.point
+            };
+        }
+        if (floorConstraint.counted && persistent.pointCount>0)
+            contactCache_[floorConstraint.key]=persistent;
+        else
+            contactCache_.erase(floorConstraint.key);
+    }
+
     for (auto it=contactCache_.begin();it!=contactCache_.end();) {
         if (it->second.lastSeenStep!=totalSteps_)
             it=contactCache_.erase(it);
