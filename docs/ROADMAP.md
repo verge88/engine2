@@ -207,12 +207,13 @@
 ## v2.5 — развитие физики и инструментов сцены (в работе)
 - [x] Translation-only CCD динамических AABB против sphere/AABB, включая moving/moving и несколько ударов за fixed step
 - [x] Persistent pair-contact cache и warm starting накопленных normal/tangent impulses между fixed steps
-- [ ] Multi-point contact manifolds и устойчивые длительные контакты для сложных/вращающихся тел
+- [x] Clipped multi-point OBB face manifolds + per-point persistent warm starting
+- [ ] Полные manifolds для OBB/plane, feature IDs и сложных/compound вращающихся тел
 - [x] Free-spin angular velocity/integration для динамических Sphere rigid bodies + JSON/editor support
 - [x] Solid-sphere moment of inertia + friction torque для Sphere/Sphere, Sphere/AABB, CCD, warm-start и ground rolling
 - [x] Playable Orb Arena demo: player steering, collectibles, hazards, lives/restart, HUD title и headless smoke-test
 - [x] Box inertia tensor + discrete rotating OBB Sphere/Box и Box/Box collision torque
-- [ ] Rotating OBB CCD, clipped multi-point box manifolds и joints
+- [ ] Rotating OBB CCD и joints
 - [ ] Alpha-aware/GPU ID-buffer picking, rectangle occlusion, общий pivot
 - [ ] Asset browser, переносимые пути ассетов, миграции JSON schema
 - [ ] Восстановить glTF node hierarchy, анимации и skinning

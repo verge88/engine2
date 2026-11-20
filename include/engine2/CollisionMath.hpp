@@ -7,8 +7,10 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace engine2 {
 
@@ -24,9 +26,20 @@ struct Contact {
     bool colliding = false;
     glm::vec3 normal{1.0f, 0.0f, 0.0f}; // unit vector from A toward B
     float penetration = 0.0f;
-    // Representative world-space contact point. Single-point contacts are
-    // intentional; clipped multi-point OBB manifolds remain a later stage.
     glm::vec3 point{0.0f};
+};
+
+struct ManifoldPoint {
+    glm::vec3 point{0.0f};
+    float penetration = 0.0f;
+};
+
+struct ContactManifold {
+    bool colliding = false;
+    glm::vec3 normal{1.0f,0.0f,0.0f}; // unit vector from A toward B
+    float penetration = 0.0f;
+    std::array<ManifoldPoint,4> points{};
+    std::size_t pointCount = 0;
 };
 
 struct OrientedBox {
@@ -135,13 +148,28 @@ inline Contact sphereBoxContact(glm::vec3 sphere, float radius,
         sphere,radius,{box,glm::mat3(1.0f),halfExtents});
 }
 
-inline Contact orientedBoxContact(
+enum class ObbSatAxisKind : std::uint8_t { FaceA, FaceB, Edge };
+
+struct ObbSatResult {
+    bool colliding = false;
+    glm::vec3 normal{1.0f,0.0f,0.0f};
+    float penetration = 0.0f;
+    ObbSatAxisKind kind = ObbSatAxisKind::FaceA;
+    int axisA = 0;
+    int axisB = 0;
+};
+
+inline ObbSatResult orientedBoxSat(
     const OrientedBox& a,const OrientedBox& b) {
     const glm::vec3 delta=b.center-a.center;
     float minimum=std::numeric_limits<float>::infinity();
-    glm::vec3 bestAxis(1.0f,0.0f,0.0f);
+    ObbSatResult best;
 
-    const auto consider=[&](glm::vec3 rawAxis) {
+    const auto priority=[](ObbSatAxisKind kind) {
+        return kind==ObbSatAxisKind::Edge ? 1 : 0;
+    };
+    const auto consider=[&](glm::vec3 rawAxis,ObbSatAxisKind kind,
+                            int axisA,int axisB) {
         const float squared=glm::dot(rawAxis,rawAxis);
         if (squared<1.0e-10f) return true;
         const glm::vec3 axis=rawAxis/std::sqrt(squared);
@@ -150,25 +178,291 @@ inline Contact orientedBoxContact(
         const float separation=std::abs(glm::dot(delta,axis));
         const float overlap=radiusA+radiusB-separation;
         if (overlap<=0.0f) return false;
-        if (overlap<minimum) {
+
+        constexpr float tieEpsilon=1.0e-5f;
+        const bool better=overlap<minimum-tieEpsilon ||
+            (std::abs(overlap-minimum)<=tieEpsilon &&
+             priority(kind)<priority(best.kind));
+        if (better) {
             minimum=overlap;
-            bestAxis=glm::dot(delta,axis)>=0.0f ? axis : -axis;
+            best.colliding=true;
+            best.normal=glm::dot(delta,axis)>=0.0f ? axis : -axis;
+            best.penetration=overlap;
+            best.kind=kind;
+            best.axisA=axisA;
+            best.axisB=axisB;
         }
         return true;
     };
 
     for (int axis=0;axis<3;++axis)
-        if (!consider(a.rotation[axis])) return {};
+        if (!consider(a.rotation[axis],ObbSatAxisKind::FaceA,axis,-1))
+            return {};
     for (int axis=0;axis<3;++axis)
-        if (!consider(b.rotation[axis])) return {};
+        if (!consider(b.rotation[axis],ObbSatAxisKind::FaceB,-1,axis))
+            return {};
     for (int i=0;i<3;++i)
         for (int j=0;j<3;++j)
-            if (!consider(glm::cross(a.rotation[i],b.rotation[j])))
+            if (!consider(glm::cross(a.rotation[i],b.rotation[j]),
+                          ObbSatAxisKind::Edge,i,j))
                 return {};
+    return best;
+}
 
-    const glm::vec3 pointA=orientedBoxFeatureSupport(a,bestAxis);
-    const glm::vec3 pointB=orientedBoxFeatureSupport(b,-bestAxis);
-    return {true,bestAxis,minimum,0.5f*(pointA+pointB)};
+struct ClipPolygon {
+    std::array<glm::vec3,8> vertices{};
+    std::size_t count = 0;
+};
+
+inline ClipPolygon clipPolygonAgainstPlane(
+    const ClipPolygon& input,glm::vec3 normal,float offset) {
+    ClipPolygon output;
+    if (input.count==0) return output;
+    constexpr float epsilon=1.0e-6f;
+
+    glm::vec3 previous=input.vertices[input.count-1];
+    float previousDistance=glm::dot(normal,previous)-offset;
+    bool previousInside=previousDistance<=epsilon;
+    for (std::size_t i=0;i<input.count;++i) {
+        const glm::vec3 current=input.vertices[i];
+        const float currentDistance=glm::dot(normal,current)-offset;
+        const bool currentInside=currentDistance<=epsilon;
+
+        if (currentInside!=previousInside) {
+            const float denominator=previousDistance-currentDistance;
+            const float t=std::abs(denominator)>1.0e-12f
+                ? previousDistance/denominator : 0.0f;
+            if (output.count<output.vertices.size())
+                output.vertices[output.count++]=
+                    previous+(current-previous)*glm::clamp(t,0.0f,1.0f);
+        }
+        if (currentInside && output.count<output.vertices.size())
+            output.vertices[output.count++]=current;
+
+        previous=current;
+        previousDistance=currentDistance;
+        previousInside=currentInside;
+    }
+    return output;
+}
+
+inline void addManifoldPoint(
+    ContactManifold& manifold,glm::vec3 point,float penetration) {
+    if (penetration<0.0f) return;
+    if (manifold.pointCount<manifold.points.size()) {
+        manifold.points[manifold.pointCount++]={point,penetration};
+        return;
+    }
+
+    std::size_t shallowest=0;
+    for (std::size_t i=1;i<manifold.points.size();++i)
+        if (manifold.points[i].penetration<
+            manifold.points[shallowest].penetration)
+            shallowest=i;
+    if (penetration>manifold.points[shallowest].penetration)
+        manifold.points[shallowest]={point,penetration};
+}
+
+inline ContactManifold orientedBoxFaceManifold(
+    const OrientedBox& reference,const OrientedBox& incident,
+    int referenceAxis,glm::vec3 referenceNormal,
+    glm::vec3 manifoldNormal,float satPenetration) {
+    ContactManifold result;
+    result.colliding=true;
+    result.normal=manifoldNormal;
+    result.penetration=satPenetration;
+
+    const float referenceSide=
+        glm::dot(reference.rotation[referenceAxis],referenceNormal)>=0.0f
+            ? 1.0f : -1.0f;
+    const glm::vec3 referenceFaceCenter=
+        reference.center+
+        reference.rotation[referenceAxis]*
+            (referenceSide*reference.halfExtents[referenceAxis]);
+
+    int incidentAxis=0;
+    float incidentAlignment=
+        std::abs(glm::dot(incident.rotation[0],referenceNormal));
+    for (int axis=1;axis<3;++axis) {
+        const float candidate=
+            std::abs(glm::dot(incident.rotation[axis],referenceNormal));
+        if (candidate>incidentAlignment) {
+            incidentAlignment=candidate;
+            incidentAxis=axis;
+        }
+    }
+    const float incidentSide=
+        glm::dot(incident.rotation[incidentAxis],referenceNormal)>0.0f
+            ? -1.0f : 1.0f;
+    const glm::vec3 incidentCenter=
+        incident.center+
+        incident.rotation[incidentAxis]*
+            (incidentSide*incident.halfExtents[incidentAxis]);
+
+    int sideAxes[2];
+    int sideCount=0;
+    for (int axis=0;axis<3;++axis)
+        if (axis!=incidentAxis) sideAxes[sideCount++]=axis;
+    const glm::vec3 iu=
+        incident.rotation[sideAxes[0]]*incident.halfExtents[sideAxes[0]];
+    const glm::vec3 iv=
+        incident.rotation[sideAxes[1]]*incident.halfExtents[sideAxes[1]];
+
+    ClipPolygon polygon;
+    polygon.count=4;
+    polygon.vertices[0]=incidentCenter-iu-iv;
+    polygon.vertices[1]=incidentCenter+iu-iv;
+    polygon.vertices[2]=incidentCenter+iu+iv;
+    polygon.vertices[3]=incidentCenter-iu+iv;
+
+    int referenceSideAxes[2];
+    sideCount=0;
+    for (int axis=0;axis<3;++axis)
+        if (axis!=referenceAxis) referenceSideAxes[sideCount++]=axis;
+
+    for (int side=0;side<2;++side) {
+        const int axis=referenceSideAxes[side];
+        const glm::vec3 direction=reference.rotation[axis];
+        const float positive=
+            glm::dot(direction,reference.center)+reference.halfExtents[axis];
+        polygon=clipPolygonAgainstPlane(polygon,direction,positive);
+        const glm::vec3 negativeDirection=-direction;
+        const float negative=
+            glm::dot(negativeDirection,reference.center)+
+            reference.halfExtents[axis];
+        polygon=clipPolygonAgainstPlane(
+            polygon,negativeDirection,negative);
+    }
+
+    constexpr float contactEpsilon=2.0e-4f;
+    for (std::size_t i=0;i<polygon.count;++i) {
+        const glm::vec3 point=polygon.vertices[i];
+        const float separation=
+            glm::dot(referenceNormal,point-referenceFaceCenter);
+        if (separation>contactEpsilon) continue;
+        const float penetration=std::max(0.0f,-separation);
+        const glm::vec3 midpoint=
+            point-referenceNormal*(0.5f*separation);
+        addManifoldPoint(result,midpoint,penetration);
+    }
+    return result;
+}
+
+inline void closestSegmentPoints(
+    glm::vec3 p1,glm::vec3 q1,glm::vec3 p2,glm::vec3 q2,
+    glm::vec3& first,glm::vec3& second) {
+    const glm::vec3 d1=q1-p1;
+    const glm::vec3 d2=q2-p2;
+    const glm::vec3 r=p1-p2;
+    const float a=glm::dot(d1,d1);
+    const float e=glm::dot(d2,d2);
+    const float f=glm::dot(d2,r);
+
+    float s=0.0f;
+    float t=0.0f;
+    constexpr float epsilon=1.0e-10f;
+    if (a<=epsilon && e<=epsilon) {
+        first=p1;
+        second=p2;
+        return;
+    }
+    if (a<=epsilon) {
+        t=glm::clamp(f/e,0.0f,1.0f);
+    } else {
+        const float c=glm::dot(d1,r);
+        if (e<=epsilon) {
+            s=glm::clamp(-c/a,0.0f,1.0f);
+        } else {
+            const float b=glm::dot(d1,d2);
+            const float denominator=a*e-b*b;
+            if (std::abs(denominator)>epsilon)
+                s=glm::clamp((b*f-c*e)/denominator,0.0f,1.0f);
+            t=(b*s+f)/e;
+            if (t<0.0f) {
+                t=0.0f;
+                s=glm::clamp(-c/a,0.0f,1.0f);
+            } else if (t>1.0f) {
+                t=1.0f;
+                s=glm::clamp((b-c)/a,0.0f,1.0f);
+            }
+        }
+    }
+    first=p1+d1*s;
+    second=p2+d2*t;
+}
+
+inline std::pair<glm::vec3,glm::vec3> orientedBoxEdgeSegment(
+    const OrientedBox& box,int edgeAxis,glm::vec3 supportDirection) {
+    glm::vec3 center=box.center;
+    for (int axis=0;axis<3;++axis) {
+        if (axis==edgeAxis) continue;
+        const float sign=glm::dot(
+            supportDirection,box.rotation[axis])>=0.0f ? 1.0f : -1.0f;
+        center+=box.rotation[axis]*(sign*box.halfExtents[axis]);
+    }
+    const glm::vec3 extent=
+        box.rotation[edgeAxis]*box.halfExtents[edgeAxis];
+    return {center-extent,center+extent};
+}
+
+inline ContactManifold orientedBoxManifold(
+    const OrientedBox& a,const OrientedBox& b) {
+    const ObbSatResult sat=orientedBoxSat(a,b);
+    if (!sat.colliding) return {};
+
+    ContactManifold result;
+    if (sat.kind==ObbSatAxisKind::FaceA) {
+        result=orientedBoxFaceManifold(
+            a,b,sat.axisA,sat.normal,sat.normal,sat.penetration);
+    } else if (sat.kind==ObbSatAxisKind::FaceB) {
+        result=orientedBoxFaceManifold(
+            b,a,sat.axisB,-sat.normal,sat.normal,sat.penetration);
+    } else {
+        result.colliding=true;
+        result.normal=sat.normal;
+        result.penetration=sat.penetration;
+        const auto edgeA=orientedBoxEdgeSegment(a,sat.axisA,sat.normal);
+        const auto edgeB=orientedBoxEdgeSegment(b,sat.axisB,-sat.normal);
+        glm::vec3 pointA,pointB;
+        closestSegmentPoints(
+            edgeA.first,edgeA.second,edgeB.first,edgeB.second,
+            pointA,pointB);
+        addManifoldPoint(
+            result,0.5f*(pointA+pointB),sat.penetration);
+    }
+
+    if (result.pointCount==0) {
+        result.colliding=true;
+        result.normal=sat.normal;
+        result.penetration=sat.penetration;
+        const glm::vec3 pointA=orientedBoxFeatureSupport(a,sat.normal);
+        const glm::vec3 pointB=orientedBoxFeatureSupport(b,-sat.normal);
+        addManifoldPoint(
+            result,0.5f*(pointA+pointB),sat.penetration);
+    }
+    return result;
+}
+
+inline ContactManifold singleContactManifold(const Contact& contact) {
+    ContactManifold result;
+    if (!contact.colliding) return result;
+    result.colliding=true;
+    result.normal=contact.normal;
+    result.penetration=contact.penetration;
+    result.points[0]={contact.point,contact.penetration};
+    result.pointCount=1;
+    return result;
+}
+
+inline Contact orientedBoxContact(
+    const OrientedBox& a,const OrientedBox& b) {
+    const ContactManifold manifold=orientedBoxManifold(a,b);
+    if (!manifold.colliding || manifold.pointCount==0) return {};
+    glm::vec3 average(0.0f);
+    for (std::size_t i=0;i<manifold.pointCount;++i)
+        average+=manifold.points[i].point;
+    average/=static_cast<float>(manifold.pointCount);
+    return {true,manifold.normal,manifold.penetration,average};
 }
 
 inline Contact boxBoxContact(glm::vec3 a, glm::vec3 halfA,
@@ -195,6 +489,18 @@ inline Contact colliderContactOriented(
     return orientedBoxContact(
         {positionA,rotationA,a.halfExtents},
         {positionB,rotationB,b.halfExtents});
+}
+
+inline ContactManifold colliderContactManifoldOriented(
+    const ColliderGeometry& a,glm::vec3 positionA,const glm::mat3& rotationA,
+    const ColliderGeometry& b,glm::vec3 positionB,const glm::mat3& rotationB) {
+    if (a.shape==ColliderShape::Box && b.shape==ColliderShape::Box)
+        return orientedBoxManifold(
+            {positionA,rotationA,a.halfExtents},
+            {positionB,rotationB,b.halfExtents});
+    return singleContactManifold(
+        colliderContactOriented(
+            a,positionA,rotationA,b,positionB,rotationB));
 }
 
 inline Contact colliderContact(const ColliderGeometry& a, glm::vec3 positionA,

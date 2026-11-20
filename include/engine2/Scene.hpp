@@ -78,7 +78,9 @@ struct SceneStats {
     std::uint64_t sphereContacts = 0;  // accumulated resolved sphere-sphere contacts
     std::uint64_t boxContacts = 0;     // accumulated resolved contacts involving boxes
     std::size_t persistentContacts = 0;// current cross-step resting contact cache
-    std::uint64_t contactWarmStarts = 0;// accumulated cache reuses across fixed steps
+    std::uint64_t contactWarmStarts = 0;// accumulated cache point reuses across fixed steps
+    std::uint64_t multiPointManifolds = 0;// accumulated OBB contacts with >1 points
+    std::uint64_t manifoldPoints = 0;   // accumulated generated contact points
     std::uint64_t solverPasses = 0;    // accumulated sequential solver passes
 };
 
@@ -132,11 +134,16 @@ public:
 private:
     using ContactCacheKey = std::array<std::uint32_t,4>;
 
-    struct PersistentContactState {
+    struct PersistentContactPoint {
         float normalImpulse = 0.0f;
         glm::vec3 tangentImpulse{0.0f};
-        glm::vec3 normal{1.0f,0.0f,0.0f};
         glm::vec3 point{0.0f};
+    };
+
+    struct PersistentContactState {
+        glm::vec3 normal{1.0f,0.0f,0.0f};
+        std::array<PersistentContactPoint,4> points{};
+        std::size_t pointCount = 0;
         std::uint64_t lastSeenStep = 0;
     };
 
@@ -175,6 +182,8 @@ private:
     std::uint64_t sphereContacts_ = 0;
     std::uint64_t boxContacts_ = 0;
     std::uint64_t contactWarmStarts_ = 0;
+    std::uint64_t multiPointManifolds_ = 0;
+    std::uint64_t manifoldPoints_ = 0;
     std::uint64_t solverPasses_ = 0;
 };
 
